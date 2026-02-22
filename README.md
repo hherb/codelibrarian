@@ -30,19 +30,24 @@ Python gets deeper analysis (parameter defaults, decorators, call extraction) be
 
 ## Installation
 
-Requires Python 3.11+.
+Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 git clone https://github.com/hherb/codelibrarian.git
 cd codelibrarian
-pip install .
-
-# Or editable install for development
-pip install -e ".[dev]"
-
-# Or using uv
-uv pip install .
+uv tool install .
 ```
+
+This installs `codelibrarian` as a standalone command on your PATH using uv's managed Python, which includes SQLite extension support required by sqlite-vec.
+
+For development:
+
+```bash
+uv sync
+uv run codelibrarian --help
+```
+
+> **Note:** `pip install .` also works but requires a Python build with SQLite extension loading enabled. macOS system Python and pyenv default builds lack this. If you hit `enable_load_extension` errors, use the `uv tool install` method above.
 
 ### Embedding Server (Optional)
 

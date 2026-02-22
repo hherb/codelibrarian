@@ -153,7 +153,17 @@ class SQLiteStore:
         conn.row_factory = sqlite3.Row
 
         # Load sqlite-vec extension
-        conn.enable_load_extension(True)
+        try:
+            conn.enable_load_extension(True)
+        except AttributeError:
+            raise RuntimeError(
+                "Python's sqlite3 module was compiled without extension loading support. "
+                "This is common with pyenv or macOS system Python.\n"
+                "Fix: install with 'uv tool install /path/to/codelibrarian' which uses "
+                "a compatible Python build, or rebuild Python with:\n"
+                "  PYTHON_CONFIGURE_OPTS='--enable-loadable-sqlite-extensions' "
+                "pyenv install <version>"
+            ) from None
         sqlite_vec.load(conn)
         conn.enable_load_extension(False)
 

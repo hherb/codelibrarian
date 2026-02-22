@@ -4,22 +4,21 @@ This guide walks you through indexing a project and running your first queries.
 
 ## 1. Install Codelibrarian
 
+You need [uv](https://docs.astral.sh/uv/) installed. Then:
+
 ```bash
 git clone https://github.com/hherb/codelibrarian.git
 cd codelibrarian
-pip install .
+uv tool install .
 ```
 
-This installs the `codelibrarian` command on your PATH. If you prefer an editable install for development:
+This installs the `codelibrarian` command on your PATH. It uses uv's managed Python which includes the SQLite extension support that codelibrarian requires.
+
+For development, use `uv sync` and prefix commands with `uv run`:
 
 ```bash
-pip install -e ".[dev]"
-```
-
-Or using [uv](https://docs.astral.sh/uv/):
-
-```bash
-uv pip install .
+uv sync
+uv run codelibrarian --help
 ```
 
 ## 2. (Optional) Set Up Semantic Search
