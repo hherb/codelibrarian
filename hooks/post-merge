@@ -1,0 +1,8 @@
+#!/bin/sh
+# codelibrarian git hook: post-merge
+# Incrementally reindex files changed by the merge
+
+CHANGED=$(git diff --name-only ORIG_HEAD HEAD 2>/dev/null)
+if [ -n "$CHANGED" ]; then
+    codelibrarian index --files $CHANGED >/dev/null 2>&1 &
+fi

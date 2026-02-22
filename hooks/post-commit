@@ -1,0 +1,8 @@
+#!/bin/sh
+# codelibrarian git hook: post-commit
+# Incrementally reindex changed files in the background
+
+CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null)
+if [ -n "$CHANGED" ]; then
+    codelibrarian index --files $CHANGED >/dev/null 2>&1 &
+fi

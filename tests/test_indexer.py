@@ -1,0 +1,96 @@
+"""End-to-end indexer tests using the Python sample fixture."""
+
+from pathlib import Path
+
+import pytest
+
+from codelibrarian.config import Config
+from codelibrarian.indexer import Indexer
+from codelibrarian.storage.store import SQLiteStore
+
+FIXTURES = Path(__file__).parent / "fixtures" / "python_sample"
+
+
+@pytest.fixture
+def config_and_store(tmp_path):
+    config_dir = tmp_path / ".codelibrarian"
+    config_dir.mkdir()
+
+    config = Config(
+        data={
+            "index": {
+                "root": str(FIXTURES),
+                "exclude": ["__pycache__/", ".git/"],
+                "languages": ["python"],
+            },
+            "embeddings": {
+                "api_url": "http://localhost:11434/v1/embeddings",
+                "model": "nomic-embed-text-v2-moe",
+                "dimensions": 4,
+                "batch_size": 32,
+                "max_chars": 1600,
+                "enabled": False,
+            },
+            "database": {"path": str(tmp_path / "test.db")},
+        },
+        config_dir=config_dir,
+    )
+
+    store = SQLiteStore(config.db_path, embedding_dimensions=4)
+    store.connect()
+    store.init_schema()
+    return config, store
+
+
+def test_indexer_finds_symbols(config_and_store):
+    config, store = config_and_store
+    indexer = Indexer(store, config)
+    stats = indexer.index_root()
+
+    assert stats.files_indexed >= 1
+    assert stats.symbols_added > 0
+
+    results = store.lookup_symbol("Animal")
+    assert len(results) > 0
+    assert results[0].kind == "class"
+
+    store.close()
+
+
+def test_indexer_incremental_skip(config_and_store):
+    config, store = config_and_store
+    indexer = Indexer(store, config)
+
+    stats1 = indexer.index_root(full=False)
+    store.conn.commit()
+    stats2 = indexer.index_root(full=False)
+
+    assert stats2.files_skipped >= stats1.files_indexed
+    assert stats2.files_indexed == 0
+    store.close()
+
+
+def test_indexer_full_reindex(config_and_store):
+    config, store = config_and_store
+    indexer = Indexer(store, config)
+
+    indexer.index_root(full=False)
+    store.conn.commit()
+    stats2 = indexer.index_root(full=True)
+
+    assert stats2.files_indexed >= 1
+    store.close()
+
+
+def test_indexer_graph_edges(config_and_store):
+    config, store = config_and_store
+    indexer = Indexer(store, config)
+    indexer.index_root()
+    store.conn.commit()
+
+    # Dog inherits Animal
+    hierarchy = store.get_class_hierarchy("Dog")
+    parent_names = [p["name"] for p in hierarchy["parents"]]
+    assert "Animal" in parent_names
+
+    store.close()
