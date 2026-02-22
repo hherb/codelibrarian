@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import sys
 from pathlib import Path
 
@@ -134,8 +135,6 @@ class Config:
         return p
 
     def is_excluded(self, path: Path) -> bool:
-        import fnmatch
-
         path_str = str(path)
         for pattern in self.exclude_patterns:
             if fnmatch.fnmatch(path_str, f"*{pattern}*"):

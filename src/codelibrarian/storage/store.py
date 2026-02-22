@@ -9,6 +9,19 @@ from typing import Iterator
 
 import sqlite_vec
 
+# --------------------------------------------------------------------------- #
+# Query limits — use these constants everywhere instead of inline literals
+# --------------------------------------------------------------------------- #
+
+#: Maximum rows returned by exact/prefix symbol look-ups.
+_LOOKUP_LIMIT: int = 20
+#: Maximum rows returned by :meth:`SQLiteStore.list_symbols`.
+_LIST_LIMIT: int = 200
+#: Maximum symbols fetched per embedding batch cycle.
+_EMBED_BATCH_CEILING: int = 1000
+#: Maximum recursion depth for ancestor/descendant class-hierarchy CTEs.
+_HIERARCHY_DEPTH: int = 5
+
 from codelibrarian.models import (
     GraphEdges,
     Parameter,
@@ -287,9 +300,9 @@ class SQLiteStore:
             FROM symbols s JOIN files f ON s.file_id = f.id
             WHERE s.name = ? OR s.qualified_name = ?
             ORDER BY length(s.qualified_name)
-            LIMIT 20
+            LIMIT ?
             """,
-            (name, name),
+            (name, name, _LOOKUP_LIMIT),
         ).fetchall()
         return [SymbolRecord.from_row(dict(r)) for r in rows]
 
@@ -300,9 +313,9 @@ class SQLiteStore:
             FROM symbols s JOIN files f ON s.file_id = f.id
             WHERE s.name LIKE ? OR s.qualified_name LIKE ?
             ORDER BY length(s.qualified_name)
-            LIMIT 20
+            LIMIT ?
             """,
-            (f"{name}%", f"%{name}%"),
+            (f"{name}%", f"%{name}%", _LOOKUP_LIMIT),
         ).fetchall()
         return [SymbolRecord.from_row(dict(r)) for r in rows]
 
@@ -312,7 +325,7 @@ class SQLiteStore:
         pattern: str | None = None,
         file_path: str | None = None,
     ) -> list[SymbolRecord]:
-        conditions = []
+        conditions: list[str] = []
         params: list = []
 
         if kind:
@@ -326,13 +339,14 @@ class SQLiteStore:
             params.append(file_path)
 
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(_LIST_LIMIT)
         rows = self.conn.execute(
             f"""
             SELECT s.*, f.path, f.relative_path
             FROM symbols s JOIN files f ON s.file_id = f.id
             {where}
             ORDER BY s.qualified_name
-            LIMIT 200
+            LIMIT ?
             """,
             params,
         ).fetchall()
@@ -387,7 +401,7 @@ class SQLiteStore:
         rows = self.conn.execute("SELECT symbol_id FROM symbol_embeddings").fetchall()
         return {r["symbol_id"] for r in rows}
 
-    def symbols_without_embeddings(self, limit: int = 1000) -> list[tuple[int, str, str]]:
+    def symbols_without_embeddings(self, limit: int = _EMBED_BATCH_CEILING) -> list[tuple[int, str, str]]:
         """Returns (id, signature, docstring) for symbols lacking embeddings."""
         rows = self.conn.execute(
             """
@@ -565,7 +579,7 @@ class SQLiteStore:
         cls = dict(cls_rows[0])
 
         parents = self.conn.execute(
-            """
+            f"""
             WITH RECURSIVE ancestor(id, depth) AS (
                 SELECT i.parent_id, 1
                 FROM inherits i
@@ -574,7 +588,7 @@ class SQLiteStore:
                 SELECT i2.parent_id, a.depth + 1
                 FROM inherits i2
                 JOIN ancestor a ON i2.child_id = a.id
-                WHERE a.depth < 5
+                WHERE a.depth < {_HIERARCHY_DEPTH}
             )
             SELECT DISTINCT s.name, s.qualified_name, f.relative_path
             FROM ancestor a
@@ -585,7 +599,7 @@ class SQLiteStore:
         ).fetchall()
 
         children = self.conn.execute(
-            """
+            f"""
             WITH RECURSIVE descendant(id, depth) AS (
                 SELECT i.child_id, 1
                 FROM inherits i
@@ -594,7 +608,7 @@ class SQLiteStore:
                 SELECT i2.child_id, d.depth + 1
                 FROM inherits i2
                 JOIN descendant d ON i2.parent_id = d.id
-                WHERE d.depth < 5
+                WHERE d.depth < {_HIERARCHY_DEPTH}
             )
             SELECT DISTINCT s.name, s.qualified_name, f.relative_path
             FROM descendant d

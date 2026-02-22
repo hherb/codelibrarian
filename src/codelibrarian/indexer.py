@@ -16,12 +16,14 @@ from codelibrarian.storage.store import SQLiteStore
 
 
 class IndexStats:
-    def __init__(self):
-        self.files_scanned = 0
-        self.files_indexed = 0
-        self.files_skipped = 0
-        self.symbols_added = 0
-        self.embeddings_added = 0
+    """Counters and error log collected during one indexing run."""
+
+    def __init__(self) -> None:
+        self.files_scanned: int = 0
+        self.files_indexed: int = 0
+        self.files_skipped: int = 0
+        self.symbols_added: int = 0
+        self.embeddings_added: int = 0
         self.errors: list[str] = []
 
     def __str__(self) -> str:
@@ -262,6 +264,7 @@ class Indexer:
 # --------------------------------------------------------------------------- #
 
 def _file_hash(path: Path) -> str:
+    """Return the SHA-256 hex digest of *path*'s contents."""
     h = hashlib.sha256()
     h.update(path.read_bytes())
     return h.hexdigest()

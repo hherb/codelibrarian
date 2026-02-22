@@ -61,7 +61,7 @@ class _Visitor(ast.NodeVisitor):
         qualified = self._qualify(node.name)
         parent_qn = self._class_stack[-1] if self._class_stack else None
 
-        sig = self._class_signature(node)
+        sig = _class_signature(node)
         doc = ast.get_docstring(node) or ""
 
         sym = Symbol(
@@ -173,6 +173,7 @@ class _CallExtractor(ast.NodeVisitor):
 # --------------------------------------------------------------------------- #
 
 def _expr_to_name(node: ast.expr) -> str | None:
+    """Convert an AST expression to a dotted name string, or None if not representable."""
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
@@ -182,10 +183,12 @@ def _expr_to_name(node: ast.expr) -> str | None:
 
 
 def _annotation_to_str(node: ast.expr) -> str:
+    """Unparse an annotation AST node to its source representation."""
     return ast.unparse(node)
 
 
 def _decorator_name(node: ast.expr) -> str:
+    """Return a human-readable name for a decorator expression."""
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
@@ -196,21 +199,20 @@ def _decorator_name(node: ast.expr) -> str:
 
 
 def _extract_params(node: _FuncNode) -> list[Parameter]:
-    params = []
+    """Extract parameter metadata from a function/method AST node."""
+    params: list[Parameter] = []
     args = node.args
     defaults = args.defaults
     num_args = len(args.args)
-    # defaults are right-aligned
+    # defaults list is right-aligned against args.args
     defaults_offset = num_args - len(defaults)
 
     for i, arg in enumerate(args.args):
-        if arg.arg == "self" or arg.arg == "cls":
+        if arg.arg in ("self", "cls"):
             continue
         type_str = _annotation_to_str(arg.annotation) if arg.annotation else None
         default_idx = i - defaults_offset
-        default_str = None
-        if default_idx >= 0:
-            default_str = ast.unparse(defaults[default_idx])
+        default_str = ast.unparse(defaults[default_idx]) if default_idx >= 0 else None
         params.append(Parameter(name=arg.arg, type=type_str, default=default_str))
 
     for arg in args.posonlyargs:
@@ -235,10 +237,9 @@ def _build_signature(
     params: list[Parameter],
     return_type: str | None,
 ) -> str:
-    is_async = isinstance(node, ast.AsyncFunctionDef)
-    prefix = "async def" if is_async else "def"
-
-    param_parts = []
+    """Build a human-readable function signature string from its AST node."""
+    prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
+    param_parts: list[str] = []
     for p in params:
         part = p.name
         if p.type:
@@ -246,7 +247,6 @@ def _build_signature(
         if p.default is not None:
             part += f" = {p.default}"
         param_parts.append(part)
-
     sig = f"{prefix} {node.name}({', '.join(param_parts)})"
     if return_type:
         sig += f" -> {return_type}"
@@ -254,11 +254,8 @@ def _build_signature(
 
 
 def _class_signature(node: ast.ClassDef) -> str:
+    """Build a human-readable class signature string from its AST node."""
     bases = [ast.unparse(b) for b in node.bases]
     if bases:
         return f"class {node.name}({', '.join(bases)})"
     return f"class {node.name}"
-
-
-# Monkey-patch missing helper onto module-level visitor
-_Visitor._class_signature = staticmethod(_class_signature)  # type: ignore[attr-defined]

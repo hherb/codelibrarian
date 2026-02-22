@@ -6,6 +6,10 @@ from codelibrarian.embeddings import EmbeddingClient
 from codelibrarian.models import SearchResult, SymbolRecord
 from codelibrarian.storage.store import SQLiteStore
 
+# BM25 scores are negative; dividing by this scale brings typical values into [0, 1].
+# Empirically, absolute BM25 scores for short documents rarely exceed this value.
+_BM25_SCALE: float = 10.0
+
 
 class Searcher:
     def __init__(self, store: SQLiteStore, embedder: EmbeddingClient | None = None):
@@ -38,7 +42,7 @@ class Searcher:
             safe_query = _escape_fts5(query)
             if safe_query:
                 for sym_id, score in self.store.fts_search(safe_query, limit=limit * 2):
-                    fts_hits[sym_id] = min(score / 10.0, 1.0)  # Normalise BM25
+                    fts_hits[sym_id] = min(score / _BM25_SCALE, 1.0)
 
         # Merge scores
         all_ids = set(fts_hits) | set(vec_hits)

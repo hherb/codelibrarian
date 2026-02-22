@@ -60,10 +60,12 @@ def _load_language(lang: str) -> Language | None:
 # --------------------------------------------------------------------------- #
 
 def _text(node: Node, source: bytes) -> str:
+    """Return the UTF-8 source text spanned by *node*."""
     return source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
 
 
 def _child_by_type(node: Node, *types: str) -> Node | None:
+    """Return the first direct child whose type is one of *types*, or None."""
     for child in node.children:
         if child.type in types:
             return child
@@ -71,10 +73,12 @@ def _child_by_type(node: Node, *types: str) -> Node | None:
 
 
 def _children_by_type(node: Node, *types: str) -> list[Node]:
+    """Return all direct children whose type is one of *types*."""
     return [c for c in node.children if c.type in types]
 
 
 def _first_named_child(node: Node) -> Node | None:
+    """Return the first named (non-anonymous) direct child, or None."""
     for child in node.children:
         if child.is_named:
             return child
@@ -324,6 +328,8 @@ class _TSExtractor:
 
 
 class _RustExtractor:
+    """Extracts functions, structs, enums, traits and impl blocks from Rust source."""
+
     def __init__(self, source: bytes, module_name: str):
         self.source = source
         self.module_name = module_name
@@ -420,8 +426,8 @@ class _RustExtractor:
 
     def _handle_use(self, node: Node) -> None:
         path_text = _text(node, self.source)
-        # Rough: extract module path
-        path_text = path_text.strip().lstrip("use").strip().rstrip(";")
+        # Strip leading "use " keyword and trailing semicolon
+        path_text = path_text.strip().removeprefix("use").strip().rstrip(";")
         self.edges.imports.append((self.module_name, path_text, None))
 
     def _extract_params(self, node: Node) -> list[Parameter]:

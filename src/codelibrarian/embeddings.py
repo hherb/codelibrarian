@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingClient:
@@ -39,6 +42,7 @@ class EmbeddingClient:
             items = sorted(data["data"], key=lambda x: x["index"])
             return [item["embedding"] for item in items]
         except Exception as exc:
+            logger.debug("Embedding request failed: %s", exc)
             return None
 
     def embed_texts(self, texts: list[str]) -> list[list[float] | None]:
