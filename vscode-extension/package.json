@@ -1,0 +1,135 @@
+{
+  "name": "codelibrarian-vscode",
+  "displayName": "Codelibrarian",
+  "description": "Code index search, call graphs, and CodeLens for codelibrarian projects",
+  "version": "0.1.0",
+  "publisher": "codelibrarian",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "workspaceContains:.codelibrarian/config.toml"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "codelibrarian.search",
+        "title": "Codelibrarian: Search Symbols"
+      },
+      {
+        "command": "codelibrarian.showCallers",
+        "title": "Codelibrarian: Show Callers"
+      },
+      {
+        "command": "codelibrarian.showCallees",
+        "title": "Codelibrarian: Show Callees"
+      },
+      {
+        "command": "codelibrarian.showHierarchy",
+        "title": "Codelibrarian: Show Class Hierarchy"
+      },
+      {
+        "command": "codelibrarian.reindex",
+        "title": "Codelibrarian: Re-index Workspace"
+      },
+      {
+        "command": "codelibrarian.init",
+        "title": "Codelibrarian: Initialize Project"
+      },
+      {
+        "command": "codelibrarian.refreshCallGraph",
+        "title": "Codelibrarian: Refresh Call Graph",
+        "icon": "$(refresh)"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "codelibrarian.callGraphView",
+          "name": "Call Graph",
+          "when": "codelibrarian.isActive"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "codelibrarian.refreshCallGraph",
+          "when": "view == codelibrarian.callGraphView",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "codelibrarian.showCallers",
+          "when": "codelibrarian.isActive",
+          "group": "codelibrarian@1"
+        },
+        {
+          "command": "codelibrarian.showCallees",
+          "when": "codelibrarian.isActive",
+          "group": "codelibrarian@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Codelibrarian",
+      "properties": {
+        "codelibrarian.executablePath": {
+          "type": "string",
+          "default": "codelibrarian",
+          "description": "Path to the codelibrarian executable. Defaults to PATH lookup."
+        },
+        "codelibrarian.autoIndexOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically re-index files when saved."
+        },
+        "codelibrarian.codeLensEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show caller/callee counts above functions and classes."
+        },
+        "codelibrarian.searchResultLimit": {
+          "type": "number",
+          "default": 20,
+          "description": "Maximum number of search results to return."
+        }
+      }
+    },
+    "mcp": {
+      "servers": {
+        "codelibrarian": {
+          "type": "stdio",
+          "command": "${config:codelibrarian.executablePath}",
+          "args": [
+            "serve",
+            "--path",
+            "${workspaceFolder}"
+          ]
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "vsce package",
+    "vscode:prepublish": "NODE_ENV=production node esbuild.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^18.0.0",
+    "typescript": "^5.3.0",
+    "esbuild": "^0.20.0",
+    "@vscode/vsce": "^2.24.0"
+  }
+}

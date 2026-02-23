@@ -184,6 +184,40 @@ def _make_server(config: Config) -> tuple[Server, SQLiteStore, EmbeddingClient |
                     "required": ["class_name"],
                 },
             ),
+            Tool(
+                name="count_callers",
+                description=(
+                    "Return the number of direct callers of a symbol. "
+                    "Efficient alternative to get_callers when only the count is needed."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "qualified_name": {
+                            "type": "string",
+                            "description": "Qualified name of the symbol",
+                        }
+                    },
+                    "required": ["qualified_name"],
+                },
+            ),
+            Tool(
+                name="count_callees",
+                description=(
+                    "Return the number of direct callees of a symbol. "
+                    "Efficient alternative to get_callees when only the count is needed."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "qualified_name": {
+                            "type": "string",
+                            "description": "Qualified name of the symbol",
+                        }
+                    },
+                    "required": ["qualified_name"],
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -249,6 +283,32 @@ def _dispatch(
 
     elif name == "get_class_hierarchy":
         return searcher.get_class_hierarchy(args["class_name"])
+
+    elif name == "count_callers":
+        qn = args["qualified_name"]
+        row = searcher.store.conn.execute(
+            """
+            SELECT COUNT(DISTINCT c.caller_id) AS cnt
+            FROM calls c
+            JOIN symbols s ON c.callee_id = s.id
+            WHERE s.qualified_name = ? OR s.name = ?
+            """,
+            (qn, qn),
+        ).fetchone()
+        return {"count": row["cnt"] if row else 0, "qualified_name": qn}
+
+    elif name == "count_callees":
+        qn = args["qualified_name"]
+        row = searcher.store.conn.execute(
+            """
+            SELECT COUNT(DISTINCT c.callee_id) AS cnt
+            FROM calls c
+            JOIN symbols s ON c.caller_id = s.id
+            WHERE s.qualified_name = ? OR s.name = ?
+            """,
+            (qn, qn),
+        ).fetchone()
+        return {"count": row["cnt"] if row else 0, "qualified_name": qn}
 
     else:
         raise ValueError(f"Unknown tool: {name}")

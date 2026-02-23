@@ -101,6 +101,8 @@ The server runs on stdio and provides these tools:
 | `lookup_symbol` | Look up a symbol by exact or qualified name |
 | `get_callers` | Find all callers of a function/method (recursive) |
 | `get_callees` | Find all functions called by a symbol (recursive) |
+| `count_callers` | Return the number of direct callers (efficient for UI) |
+| `count_callees` | Return the number of direct callees (efficient for UI) |
 | `get_file_imports` | Show a file's imports and reverse imports |
 | `list_symbols` | Filter symbols by kind, name pattern, or file |
 | `get_class_hierarchy` | Get inheritance tree for a class |
@@ -186,6 +188,49 @@ path = ".codelibrarian/index.db"
 ```
 
 The `api_url` accepts any OpenAI-compatible embedding endpoint — Ollama, vLLM, LiteLLM, OpenAI, etc.
+
+## VS Code Extension
+
+The `vscode-extension/` directory contains a VS Code extension that provides a rich UI on top of the codelibrarian index.
+
+### Features
+
+- **MCP auto-discovery** — The extension registers the MCP server with VS Code's built-in MCP support, so GitHub Copilot Chat and Claude Code can use all codelibrarian tools automatically with zero configuration.
+- **CodeLens annotations** — Inline caller counts above every function, method, and class. Click to open the call graph.
+- **Symbol search** — A quick-pick (`Ctrl+Shift+P` → "Codelibrarian: Search Symbols") with debounced hybrid search and click-to-navigate.
+- **Call graph tree view** — An Explorer sidebar panel showing callers and callees of any symbol, expandable to multiple hops.
+- **Auto-index on save** — Changed files are re-indexed automatically when saved (2-second debounce).
+- **Status bar** — Shows connection state to the codelibrarian MCP server.
+
+### Install from Source
+
+Requires Node.js 18+ and the `codelibrarian` CLI already installed.
+
+```bash
+cd vscode-extension
+npm install
+npm run compile
+```
+
+Then press `F5` in VS Code to launch the Extension Development Host, or package a `.vsix`:
+
+```bash
+npx vsce package
+code --install-extension codelibrarian-vscode-0.1.0.vsix
+```
+
+### Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `codelibrarian.executablePath` | `"codelibrarian"` | Path to the codelibrarian binary |
+| `codelibrarian.autoIndexOnSave` | `true` | Re-index files on save |
+| `codelibrarian.codeLensEnabled` | `true` | Show caller counts above symbols |
+| `codelibrarian.searchResultLimit` | `20` | Max results in symbol search |
+
+### Architecture
+
+The extension spawns `codelibrarian serve` as a child process and communicates over the MCP stdio protocol using `@modelcontextprotocol/sdk`. A supervisor handles crash recovery with exponential back-off. The extension requires a project that has been initialized with `codelibrarian init` — if the `.codelibrarian/` directory is missing, it offers to initialize.
 
 ## Git Hooks
 
