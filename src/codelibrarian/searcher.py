@@ -29,6 +29,14 @@ class Searcher:
         semantic_only: bool = False,
         text_only: bool = False,
     ) -> list[SearchResult]:
+        # --- Graph intent routing ---
+        intent = _classify_intent(query)
+        if intent is not None:
+            intent_type, symbol_name = intent
+            result = self._dispatch_graph(intent_type, symbol_name, limit)
+            if result is not None:
+                return result
+        # --- Existing hybrid search (unchanged below this point) ---
         fts_hits: dict[int, float] = {}
         vec_hits: dict[int, float] = {}
 
@@ -115,6 +123,50 @@ class Searcher:
 
     def get_class_hierarchy(self, class_name: str) -> dict:
         return self.store.get_class_hierarchy(class_name)
+
+    # ------------------------------------------------------------------ #
+    # Graph dispatch (internal)
+    # ------------------------------------------------------------------ #
+
+    def _dispatch_graph(
+        self, intent: str, symbol_name: str, limit: int
+    ) -> list[SearchResult] | None:
+        """Dispatch to a graph query. Returns None if the symbol isn't found."""
+        if intent == "callers":
+            if not self.store.lookup_symbol(symbol_name):
+                return None
+            symbols = self.get_callers(symbol_name)
+            return [
+                SearchResult(symbol=s, score=1.0, match_type="graph")
+                for s in symbols[:limit]
+            ]
+        elif intent == "callees":
+            if not self.store.lookup_symbol(symbol_name):
+                return None
+            symbols = self.get_callees(symbol_name)
+            return [
+                SearchResult(symbol=s, score=1.0, match_type="graph")
+                for s in symbols[:limit]
+            ]
+        elif intent == "hierarchy":
+            hierarchy = self.get_class_hierarchy(symbol_name)
+            if hierarchy.get("class") is None:
+                return None
+            results = []
+            for entry in hierarchy.get("parents", []):
+                sym = self.store.lookup_symbol(entry["qualified_name"])
+                if sym:
+                    results.append(
+                        SearchResult(symbol=sym[0], score=1.0, match_type="graph")
+                    )
+            for entry in hierarchy.get("children", []):
+                sym = self.store.lookup_symbol(entry["qualified_name"])
+                if sym:
+                    results.append(
+                        SearchResult(symbol=sym[0], score=1.0, match_type="graph")
+                    )
+            return results[:limit] if results else None
+        return None
 
 
 # --------------------------------------------------------------------------- #

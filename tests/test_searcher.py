@@ -102,6 +102,54 @@ def test_get_class_hierarchy(searcher):
 
 
 # --------------------------------------------------------------------------- #
+# Graph-intent routing integration tests
+# --------------------------------------------------------------------------- #
+
+
+def test_search_routes_to_callees(searcher):
+    """A 'called by' query should route to get_callees and return graph results."""
+    results = searcher.search("functions called by find_oldest_resident")
+    assert len(results) > 0
+    assert results[0].match_type == "graph"
+    assert results[0].score == 1.0
+    names = [r.symbol.name for r in results]
+    assert "find_oldest" in names
+
+
+def test_search_routes_to_callers(searcher):
+    """A 'who calls' query should route to get_callers and return graph results."""
+    results = searcher.search("who calls find_oldest")
+    assert len(results) > 0
+    assert results[0].match_type == "graph"
+    names = [r.symbol.name for r in results]
+    assert "find_oldest_resident" in names
+
+
+def test_search_routes_to_hierarchy(searcher):
+    """A 'subclasses of' query should route to get_class_hierarchy."""
+    results = searcher.search("subclasses of Animal")
+    assert len(results) > 0
+    assert results[0].match_type == "graph"
+    names = [r.symbol.name for r in results]
+    assert "Dog" in names
+    assert "Cat" in names
+
+
+def test_search_falls_back_for_unknown_symbol(searcher):
+    """If the classified symbol doesn't exist, fall back to hybrid search."""
+    results = searcher.search("who calls nonexistent_xyz_function")
+    # Should not crash; returns hybrid results (possibly empty)
+    assert all(r.match_type != "graph" for r in results)
+
+
+def test_search_still_does_hybrid_for_conceptual_query(searcher):
+    """Queries without graph intent should still do hybrid search as before."""
+    results = searcher.search("oldest animal", text_only=True)
+    assert len(results) > 0
+    assert all(r.match_type in ("fulltext", "hybrid", "semantic") for r in results)
+
+
+# --------------------------------------------------------------------------- #
 # Intent classification tests
 # --------------------------------------------------------------------------- #
 
