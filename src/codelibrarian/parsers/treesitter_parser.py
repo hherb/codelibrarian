@@ -480,6 +480,286 @@ class _RustExtractor:
 
 
 # --------------------------------------------------------------------------- #
+# Swift extractor
+# --------------------------------------------------------------------------- #
+
+
+class _SwiftExtractor:
+    """Extracts symbols from Swift source: classes, structs, enums, protocols,
+    extensions, functions, init declarations, imports, and call expressions."""
+
+    def __init__(self, source: bytes, module_name: str):
+        self.source = source
+        self.module_name = module_name
+        self.symbols: list[Symbol] = []
+        self.edges = GraphEdges()
+        self._class_stack: list[str] = []
+
+    def extract(self, root: Node) -> None:
+        self._walk(root)
+
+    def _walk(self, node: Node) -> None:
+        if node.type == "class_declaration":
+            self._handle_class(node)
+        elif node.type == "protocol_declaration":
+            self._handle_protocol(node)
+        elif node.type in ("function_declaration", "protocol_function_declaration"):
+            self._handle_function(node)
+        elif node.type == "init_declaration":
+            self._handle_init(node)
+        elif node.type == "import_declaration":
+            self._handle_import(node)
+        elif node.type == "call_expression":
+            self._handle_call(node)
+        else:
+            for child in node.children:
+                self._walk(child)
+
+    def _qualify(self, name: str) -> str:
+        if self._class_stack:
+            return f"{self._class_stack[-1]}.{name}"
+        return f"{self.module_name}.{name}"
+
+    def _handle_class(self, node: Node) -> None:
+        """Handle class, struct, enum, and extension declarations.
+        In Swift's tree-sitter grammar, all four share the class_declaration node type
+        and are distinguished by their first keyword child (class/struct/enum/extension)."""
+        keyword = ""
+        for child in node.children:
+            if child.type in ("class", "struct", "enum", "extension"):
+                keyword = child.type
+                break
+
+        if keyword == "extension":
+            self._handle_extension(node)
+            return
+
+        name_node = _child_by_type(node, "type_identifier")
+        if not name_node:
+            return
+        name = _text(name_node, self.source)
+        qualified = self._qualify(name)
+
+        bases = []
+        for child in node.children:
+            if child.type == "inheritance_specifier":
+                ut = _child_by_type(child, "user_type")
+                if ut:
+                    bases.append(_text(ut, self.source))
+
+        sig = f"{keyword} {name}"
+        if bases:
+            sig += f": {', '.join(bases)}"
+
+        doc = self._extract_doc_comment(node)
+        sym = Symbol(
+            name=name,
+            qualified_name=qualified,
+            kind="class",
+            file_path="",
+            line_start=node.start_point[0] + 1,
+            line_end=node.end_point[0] + 1,
+            signature=sig,
+            docstring=doc,
+            parent_qualified_name=self._class_stack[-1] if self._class_stack else None,
+        )
+        self.symbols.append(sym)
+        for base in bases:
+            self.edges.inherits.append((qualified, base))
+
+        self._class_stack.append(qualified)
+        body = _child_by_type(node, "class_body", "enum_class_body")
+        if body:
+            for child in body.children:
+                self._walk(child)
+        self._class_stack.pop()
+
+    def _handle_extension(self, node: Node) -> None:
+        """Handle extension declarations -- record protocol conformances as inherits edges."""
+        type_node = _child_by_type(node, "user_type")
+        if not type_node:
+            return
+        type_name = _text(type_node, self.source)
+        qualified = f"{self.module_name}.{type_name}"
+
+        for child in node.children:
+            if child.type == "inheritance_specifier":
+                ut = _child_by_type(child, "user_type")
+                if ut:
+                    self.edges.inherits.append((qualified, _text(ut, self.source)))
+
+        self._class_stack.append(qualified)
+        body = _child_by_type(node, "class_body")
+        if body:
+            for child in body.children:
+                self._walk(child)
+        self._class_stack.pop()
+
+    def _handle_protocol(self, node: Node) -> None:
+        name_node = _child_by_type(node, "type_identifier")
+        if not name_node:
+            return
+        name = _text(name_node, self.source)
+        qualified = self._qualify(name)
+        doc = self._extract_doc_comment(node)
+        sym = Symbol(
+            name=name,
+            qualified_name=qualified,
+            kind="class",
+            file_path="",
+            line_start=node.start_point[0] + 1,
+            line_end=node.end_point[0] + 1,
+            signature=f"protocol {name}",
+            docstring=doc,
+        )
+        self.symbols.append(sym)
+
+        self._class_stack.append(qualified)
+        body = _child_by_type(node, "protocol_body")
+        if body:
+            for child in body.children:
+                self._walk(child)
+        self._class_stack.pop()
+
+    def _handle_function(self, node: Node) -> None:
+        name_node = _child_by_type(node, "simple_identifier")
+        if not name_node:
+            return
+        name = _text(name_node, self.source)
+        kind = "method" if self._class_stack else "function"
+        qualified = self._qualify(name)
+
+        params = self._extract_params(node)
+        return_type = self._extract_return_type(node)
+        sig = self._build_sig(name, params, return_type)
+        doc = self._extract_doc_comment(node)
+
+        sym = Symbol(
+            name=name,
+            qualified_name=qualified,
+            kind=kind,
+            file_path="",
+            line_start=node.start_point[0] + 1,
+            line_end=node.end_point[0] + 1,
+            signature=sig,
+            docstring=doc,
+            parameters=params,
+            return_type=return_type,
+            parent_qualified_name=self._class_stack[-1] if self._class_stack else None,
+        )
+        self.symbols.append(sym)
+
+        body = _child_by_type(node, "function_body")
+        if body:
+            for child in body.children:
+                self._walk(child)
+
+    def _handle_init(self, node: Node) -> None:
+        if not self._class_stack:
+            return
+        name = "init"
+        qualified = self._qualify(name)
+        params = self._extract_params(node)
+        sig = f"init({', '.join(f'{p.name}: {p.type}' if p.type else p.name for p in params)})"
+        doc = self._extract_doc_comment(node)
+
+        sym = Symbol(
+            name=name,
+            qualified_name=qualified,
+            kind="method",
+            file_path="",
+            line_start=node.start_point[0] + 1,
+            line_end=node.end_point[0] + 1,
+            signature=sig,
+            docstring=doc,
+            parameters=params,
+            parent_qualified_name=self._class_stack[-1] if self._class_stack else None,
+        )
+        self.symbols.append(sym)
+
+        body = _child_by_type(node, "function_body")
+        if body:
+            for child in body.children:
+                self._walk(child)
+
+    def _handle_import(self, node: Node) -> None:
+        ident = _child_by_type(node, "identifier")
+        if ident:
+            module = _text(ident, self.source)
+            self.edges.imports.append((self.module_name, module, None))
+
+    def _handle_call(self, node: Node) -> None:
+        if node.children:
+            first = node.children[0]
+            if first.type in ("simple_identifier", "navigation_expression"):
+                name = _text(first, self.source)
+                if len(name) <= 100:
+                    parent_qn = self._class_stack[-1] if self._class_stack else (
+                        f"{self.module_name}.<top>"
+                    )
+                    self.edges.calls.append((parent_qn, name))
+        for child in node.children:
+            if child.type not in ("simple_identifier", "navigation_expression"):
+                self._walk(child)
+
+    def _extract_params(self, node: Node) -> list[Parameter]:
+        params = []
+        for child in node.children:
+            if child.type == "parameter":
+                name_node = _child_by_type(child, "simple_identifier")
+                if not name_node:
+                    continue
+                name = _text(name_node, self.source)
+                type_str = None
+                for tc in child.children:
+                    if tc.type in ("user_type", "array_type", "dictionary_type",
+                                   "optional_type", "tuple_type", "function_type"):
+                        type_str = _text(tc, self.source)
+                        break
+                params.append(Parameter(name=name, type=type_str))
+        return params
+
+    def _extract_return_type(self, node: Node) -> str | None:
+        found_arrow = False
+        for child in node.children:
+            if child.type == "->":
+                found_arrow = True
+                continue
+            if found_arrow and child.type in ("user_type", "array_type", "dictionary_type",
+                                               "optional_type", "tuple_type", "function_type"):
+                return _text(child, self.source)
+        return None
+
+    def _build_sig(self, name: str, params: list[Parameter], return_type: str | None) -> str:
+        param_strs = []
+        for p in params:
+            s = p.name
+            if p.type:
+                s += f": {p.type}"
+            param_strs.append(s)
+        sig = f"func {name}({', '.join(param_strs)})"
+        if return_type:
+            sig += f" -> {return_type}"
+        return sig
+
+    def _extract_doc_comment(self, node: Node) -> str:
+        parent = node.parent
+        if not parent:
+            return ""
+        lines = []
+        for child in parent.children:
+            if child == node:
+                break
+            if child.type == "comment":
+                text = _text(child, self.source)
+                text = text.lstrip("/").strip()
+                lines.append(text)
+            else:
+                lines = []
+        return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
 # Generic Java / C++ extractor (simplified)
 # --------------------------------------------------------------------------- #
 
@@ -591,6 +871,9 @@ class TreeSitterParser(BaseParser):
             extractor.extract(tree.root_node)
         elif lang == "rust":
             extractor = _RustExtractor(source_bytes, module_name)
+            extractor.extract(tree.root_node)
+        elif lang == "swift":
+            extractor = _SwiftExtractor(source_bytes, module_name)
             extractor.extract(tree.root_node)
         else:
             extractor = _GenericExtractor(source_bytes, module_name, lang)
