@@ -1,4 +1,4 @@
-"""tree-sitter based parser for TypeScript, JavaScript, Rust, Java, C++.
+"""tree-sitter based parser for TypeScript, JavaScript, Rust, Java, C++, Swift, Kotlin.
 
 Uses the tree-sitter 0.23+ API where language packages expose a language()
 callable and the Parser takes a Language object directly.
@@ -524,7 +524,7 @@ class _SwiftExtractor:
         """Handle class, struct, enum, and extension declarations.
         In Swift's tree-sitter grammar, all four share the class_declaration node type
         and are distinguished by their first keyword child (class/struct/enum/extension)."""
-        keyword = ""
+        keyword = "class"
         for child in node.children:
             if child.type in ("class", "struct", "enum", "extension"):
                 keyword = child.type
@@ -740,7 +740,7 @@ class _SwiftExtractor:
         sig = f"func {name}({', '.join(param_strs)})"
         if return_type:
             sig += f" -> {return_type}"
-        return sig
+        return sig[:500]
 
     def _extract_doc_comment(self, node: Node) -> str:
         parent = node.parent
@@ -1105,7 +1105,7 @@ class _KotlinExtractor:
         sig = f"{mod_prefix}fun {name}({', '.join(param_strs)})"
         if return_type:
             sig += f": {return_type}"
-        return sig
+        return sig[:500]
 
     def _extract_doc_comment(self, node: Node) -> str:
         """Extract KDoc (/** */) or line comments preceding the node."""
