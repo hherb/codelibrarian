@@ -476,6 +476,7 @@ class SQLiteStore:
 
     def resolve_graph_edges(self) -> None:
         """Attempt to resolve callee/parent names to known symbol IDs."""
+        # Pass 1: exact match on qualified_name or name
         self.conn.execute(
             """
             UPDATE calls SET callee_id = (
@@ -487,6 +488,12 @@ class SQLiteStore:
             WHERE callee_id IS NULL
             """
         )
+        # Pass 2: for dotted callee names like "obj.method" or
+        # "self.store.method", try matching the qualified_name suffix.
+        # This resolves attribute-access calls that pass 1 misses because
+        # the variable prefix (e.g. "store.") doesn't appear in either the
+        # symbol name or qualified_name.
+        self._resolve_dotted_calls()
         self.conn.execute(
             """
             UPDATE inherits SET parent_id = (
@@ -509,6 +516,28 @@ class SQLiteStore:
             WHERE to_file_id IS NULL
             """
         )
+
+    def _resolve_dotted_calls(self) -> None:
+        """Resolve remaining dotted callee names by last-component matching.
+
+        For a callee_name like ``store.upsert_file`` or ``self.conn.commit``,
+        extract the part after the last dot and match it against symbol names.
+        """
+        rows = self.conn.execute(
+            "SELECT caller_id, callee_name FROM calls "
+            "WHERE callee_id IS NULL AND callee_name LIKE '%.%'"
+        ).fetchall()
+        for row in rows:
+            suffix = row["callee_name"].rsplit(".", 1)[-1]
+            match = self.conn.execute(
+                "SELECT id FROM symbols WHERE name = ? LIMIT 1", (suffix,)
+            ).fetchone()
+            if match:
+                self.conn.execute(
+                    "UPDATE calls SET callee_id = ? "
+                    "WHERE caller_id = ? AND callee_name = ?",
+                    (match["id"], row["caller_id"], row["callee_name"]),
+                )
 
     def get_callers(self, qualified_name: str, depth: int = 1) -> list[SymbolRecord]:
         """Recursive CTE: find all symbols that (transitively) call this symbol."""

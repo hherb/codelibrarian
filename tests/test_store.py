@@ -178,6 +178,42 @@ def test_call_graph(store):
     assert any(s.name == "caller_fn" for s in callers)
 
 
+def test_call_graph_dotted_callee(store):
+    """Dotted callee names like 'obj.method' should resolve via suffix matching."""
+    fid = store.upsert_file("/a/b.py", "b.py", "python", 1.0, "x")
+    caller = _make_symbol("my_func", "m.my_func", "function")
+    method = _make_symbol("do_work", "m.SomeClass.do_work", "method")
+    caller_id = store.insert_symbol(caller, fid, None)
+    store.insert_symbol(method, fid, None)
+    store.conn.commit()
+
+    # Parser extracts "obj.do_work" — the variable prefix won't match any
+    # qualified_name or name directly, but the suffix "do_work" should.
+    store.insert_call(caller_id, "obj.do_work")
+    store.resolve_graph_edges()
+    store.conn.commit()
+
+    callees = store.get_callees("m.my_func")
+    assert any(s.name == "do_work" for s in callees)
+
+
+def test_call_graph_deeply_dotted_callee(store):
+    """Deeply dotted names like 'self.store.method' should also resolve."""
+    fid = store.upsert_file("/a/b.py", "b.py", "python", 1.0, "x")
+    caller = _make_symbol("handler", "m.handler", "function")
+    method = _make_symbol("execute", "m.DB.execute", "method")
+    caller_id = store.insert_symbol(caller, fid, None)
+    store.insert_symbol(method, fid, None)
+    store.conn.commit()
+
+    store.insert_call(caller_id, "self.db.execute")
+    store.resolve_graph_edges()
+    store.conn.commit()
+
+    callees = store.get_callees("m.handler")
+    assert any(s.name == "execute" for s in callees)
+
+
 # --------------------------------------------------------------------------- #
 # Graph: inheritance
 # --------------------------------------------------------------------------- #
