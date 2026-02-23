@@ -133,21 +133,19 @@ class Searcher:
     ) -> list[SearchResult] | None:
         """Dispatch to a graph query. Returns None if the symbol isn't found."""
         if intent == "callers":
-            if not self.store.lookup_symbol(symbol_name):
-                return None
             symbols = self.get_callers(symbol_name)
-            return [
+            results = [
                 SearchResult(symbol=s, score=1.0, match_type="graph")
                 for s in symbols[:limit]
             ]
+            return results if results else None
         elif intent == "callees":
-            if not self.store.lookup_symbol(symbol_name):
-                return None
             symbols = self.get_callees(symbol_name)
-            return [
+            results = [
                 SearchResult(symbol=s, score=1.0, match_type="graph")
                 for s in symbols[:limit]
             ]
+            return results if results else None
         elif intent == "hierarchy":
             hierarchy = self.get_class_hierarchy(symbol_name)
             if hierarchy.get("class") is None:
