@@ -846,6 +846,287 @@ class _GenericExtractor:
 
 
 # --------------------------------------------------------------------------- #
+# Kotlin extractor
+# --------------------------------------------------------------------------- #
+
+class _KotlinExtractor:
+    """Extracts symbols from Kotlin source: classes (data/sealed/enum), interfaces,
+    objects, functions (including suspend), imports, package declarations, KDoc, and calls."""
+
+    def __init__(self, source: bytes, module_name: str):
+        self.source = source
+        self.module_name = module_name
+        self.symbols: list[Symbol] = []
+        self.edges = GraphEdges()
+        self._class_stack: list[str] = []
+        self._package = self._detect_package()
+
+    def _detect_package(self) -> str | None:
+        """Scan for 'package x.y.z' in the first few lines."""
+        text = self.source.decode("utf-8", errors="replace")
+        for line in text.split("\n")[:10]:
+            stripped = line.strip()
+            if stripped.startswith("package "):
+                return stripped[8:].strip()
+        return None
+
+    @property
+    def _effective_module(self) -> str:
+        return self._package or self.module_name
+
+    def extract(self, root: Node) -> None:
+        self._walk(root)
+
+    def _walk(self, node: Node) -> None:
+        if node.type == "class_declaration":
+            self._handle_class(node)
+        elif node.type == "object_declaration":
+            self._handle_object(node)
+        elif node.type == "function_declaration":
+            self._handle_function(node)
+        elif node.type == "companion_object":
+            self._handle_companion(node)
+        elif node.type == "import":
+            self._handle_import(node)
+        elif node.type == "call_expression":
+            self._handle_call(node)
+        elif node.type == "package_header":
+            pass  # Already handled in _detect_package
+        else:
+            for child in node.children:
+                self._walk(child)
+
+    def _qualify(self, name: str) -> str:
+        if self._class_stack:
+            return f"{self._class_stack[-1]}.{name}"
+        return f"{self._effective_module}.{name}"
+
+    def _handle_class(self, node: Node) -> None:
+        """Handle class, interface, data class, sealed class, enum class."""
+        keyword = "class"
+        modifiers = []
+        for child in node.children:
+            if child.type == "interface":
+                keyword = "interface"
+            elif child.type == "modifiers":
+                for mc in child.children:
+                    if mc.type == "class_modifier":
+                        modifiers.append(_text(mc, self.source))
+
+        name_node = _child_by_type(node, "identifier")
+        if not name_node:
+            return
+        name = _text(name_node, self.source)
+        qualified = self._qualify(name)
+
+        bases = []
+        deleg = _child_by_type(node, "delegation_specifiers")
+        if deleg:
+            for child in deleg.children:
+                if child.type == "delegation_specifier":
+                    ut = _child_by_type(child, "user_type")
+                    if not ut:
+                        # Try inside constructor_invocation
+                        ci = _child_by_type(child, "constructor_invocation")
+                        if ci:
+                            ut = _child_by_type(ci, "user_type")
+                    if ut:
+                        bases.append(_text(ut, self.source).split("<")[0])
+
+        mod_prefix = " ".join(modifiers) + " " if modifiers else ""
+        sig = f"{mod_prefix}{keyword} {name}"
+        if bases:
+            sig += f" : {', '.join(bases)}"
+
+        doc = self._extract_doc_comment(node)
+        sym = Symbol(
+            name=name,
+            qualified_name=qualified,
+            kind="class",
+            file_path="",
+            line_start=node.start_point[0] + 1,
+            line_end=node.end_point[0] + 1,
+            signature=sig,
+            docstring=doc,
+            parent_qualified_name=self._class_stack[-1] if self._class_stack else None,
+        )
+        self.symbols.append(sym)
+        for base in bases:
+            self.edges.inherits.append((qualified, base))
+
+        self._class_stack.append(qualified)
+        body = _child_by_type(node, "class_body", "enum_class_body")
+        if body:
+            for child in body.children:
+                self._walk(child)
+        self._class_stack.pop()
+
+    def _handle_object(self, node: Node) -> None:
+        """Handle object declarations (singletons)."""
+        name_node = _child_by_type(node, "identifier")
+        if not name_node:
+            return
+        name = _text(name_node, self.source)
+        qualified = self._qualify(name)
+        doc = self._extract_doc_comment(node)
+
+        sym = Symbol(
+            name=name,
+            qualified_name=qualified,
+            kind="class",
+            file_path="",
+            line_start=node.start_point[0] + 1,
+            line_end=node.end_point[0] + 1,
+            signature=f"object {name}",
+            docstring=doc,
+            parent_qualified_name=self._class_stack[-1] if self._class_stack else None,
+        )
+        self.symbols.append(sym)
+
+        self._class_stack.append(qualified)
+        body = _child_by_type(node, "class_body")
+        if body:
+            for child in body.children:
+                self._walk(child)
+        self._class_stack.pop()
+
+    def _handle_companion(self, node: Node) -> None:
+        """Handle companion object -- walk its body in the enclosing class context."""
+        body = _child_by_type(node, "class_body")
+        if body:
+            for child in body.children:
+                self._walk(child)
+
+    def _handle_function(self, node: Node) -> None:
+        """Handle fun declarations, including suspend functions."""
+        name_node = _child_by_type(node, "identifier")
+        if not name_node:
+            return
+        name = _text(name_node, self.source)
+        kind = "method" if self._class_stack else "function"
+        qualified = self._qualify(name)
+
+        modifiers = []
+        mod_node = _child_by_type(node, "modifiers")
+        if mod_node:
+            for mc in mod_node.children:
+                if mc.type == "function_modifier":
+                    modifiers.append(_text(mc, self.source))
+
+        params = self._extract_params(node)
+        return_type = self._extract_return_type(node)
+        sig = self._build_sig(name, params, return_type, modifiers)
+        doc = self._extract_doc_comment(node)
+
+        sym = Symbol(
+            name=name,
+            qualified_name=qualified,
+            kind=kind,
+            file_path="",
+            line_start=node.start_point[0] + 1,
+            line_end=node.end_point[0] + 1,
+            signature=sig,
+            docstring=doc,
+            parameters=params,
+            return_type=return_type,
+            parent_qualified_name=self._class_stack[-1] if self._class_stack else None,
+        )
+        self.symbols.append(sym)
+
+        body = _child_by_type(node, "function_body")
+        if body:
+            for child in body.children:
+                self._walk(child)
+
+    def _handle_import(self, node: Node) -> None:
+        """Handle import statements."""
+        qid = _child_by_type(node, "qualified_identifier")
+        if qid:
+            module = _text(qid, self.source)
+            self.edges.imports.append((self._effective_module, module, None))
+
+    def _handle_call(self, node: Node) -> None:
+        """Record call edges."""
+        if node.children:
+            first = node.children[0]
+            if first.type in ("identifier", "navigation_expression"):
+                name = _text(first, self.source)
+                if len(name) <= 100:
+                    parent_qn = self._class_stack[-1] if self._class_stack else (
+                        f"{self._effective_module}.<top>"
+                    )
+                    self.edges.calls.append((parent_qn, name))
+        for child in node.children:
+            if child.type not in ("identifier", "navigation_expression"):
+                self._walk(child)
+
+    def _extract_params(self, node: Node) -> list[Parameter]:
+        """Extract parameters from function_value_parameters child."""
+        params = []
+        fvp = _child_by_type(node, "function_value_parameters")
+        if not fvp:
+            return params
+        for child in fvp.children:
+            if child.type == "parameter":
+                name_node = _child_by_type(child, "identifier")
+                if not name_node:
+                    continue
+                name = _text(name_node, self.source)
+                type_node = _child_by_type(child, "user_type", "nullable_type",
+                                            "function_type")
+                type_str = _text(type_node, self.source) if type_node else None
+                params.append(Parameter(name=name, type=type_str))
+        return params
+
+    def _extract_return_type(self, node: Node) -> str | None:
+        """Extract return type after ':' that follows the function_value_parameters."""
+        found_params = False
+        for child in node.children:
+            if child.type == "function_value_parameters":
+                found_params = True
+                continue
+            if found_params and child.type == ":":
+                continue
+            if found_params and child.type in ("user_type", "nullable_type", "function_type"):
+                return _text(child, self.source)
+            if found_params and child.type in ("function_body", "block"):
+                break
+        return None
+
+    def _build_sig(self, name: str, params: list[Parameter],
+                   return_type: str | None, modifiers: list[str]) -> str:
+        mod_prefix = " ".join(modifiers) + " " if modifiers else ""
+        param_strs = []
+        for p in params:
+            s = p.name
+            if p.type:
+                s += f": {p.type}"
+            param_strs.append(s)
+        sig = f"{mod_prefix}fun {name}({', '.join(param_strs)})"
+        if return_type:
+            sig += f": {return_type}"
+        return sig
+
+    def _extract_doc_comment(self, node: Node) -> str:
+        """Extract KDoc (/** */) or line comments preceding the node."""
+        parent = node.parent
+        if not parent:
+            return ""
+        prev = None
+        for child in parent.children:
+            if child == node:
+                if prev and prev.type in ("block_comment", "multiline_comment"):
+                    text = _text(prev, self.source).strip()
+                    text = re.sub(r"^/\*+\s*", "", text)
+                    text = re.sub(r"\s*\*+/$", "", text)
+                    text = re.sub(r"^\s*\*\s?", "", text, flags=re.MULTILINE)
+                    return text.strip()
+                break
+            prev = child
+        return ""
+
+
+# --------------------------------------------------------------------------- #
 # Main parser class
 # --------------------------------------------------------------------------- #
 
@@ -874,6 +1155,9 @@ class TreeSitterParser(BaseParser):
             extractor.extract(tree.root_node)
         elif lang == "swift":
             extractor = _SwiftExtractor(source_bytes, module_name)
+            extractor.extract(tree.root_node)
+        elif lang == "kotlin":
+            extractor = _KotlinExtractor(source_bytes, module_name)
             extractor.extract(tree.root_node)
         else:
             extractor = _GenericExtractor(source_bytes, module_name, lang)
