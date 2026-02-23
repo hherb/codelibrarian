@@ -149,7 +149,7 @@ class SymbolRecord:
 class SearchResult:
     symbol: SymbolRecord
     score: float
-    match_type: Literal["semantic", "fulltext", "hybrid"]
+    match_type: Literal["semantic", "fulltext", "hybrid", "graph"]
 
     def to_dict(self) -> dict:
         d = self.symbol.to_dict()
