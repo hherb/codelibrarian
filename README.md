@@ -25,8 +25,10 @@ Codelibrarian parses your source files into a SQLite database with:
 | Rust       | tree-sitter| `.rs`                          |
 | Java       | tree-sitter| `.java`                        |
 | C/C++      | tree-sitter| `.c`, `.h`, `.cpp`, `.cc`, `.cxx`, `.hpp` |
+| Swift      | tree-sitter| `.swift`                       |
+| Kotlin     | tree-sitter| `.kt`, `.kts`                  |
 
-Python gets deeper analysis (parameter defaults, decorators, call extraction) because it uses Python's own AST module. Other languages use tree-sitter grammars.
+Python gets deeper analysis (parameter defaults, decorators, call extraction) because it uses Python's own AST module. Swift and Kotlin have rich extractors (protocols/interfaces, extensions, data classes, suspend functions, doc comments). Other languages use tree-sitter grammars with basic class/method extraction.
 
 ## Installation
 
@@ -163,7 +165,7 @@ exclude = [
     ".codelibrarian/",
     "*.min.js",
 ]
-languages = ["python", "typescript", "javascript", "rust", "java", "cpp"]
+languages = ["python", "typescript", "javascript", "rust", "java", "cpp", "swift", "kotlin"]
 
 [embeddings]
 api_url    = "http://localhost:11434/v1/embeddings"  # Ollama default
