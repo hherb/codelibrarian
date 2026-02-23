@@ -206,6 +206,8 @@ class Indexer:
                 self.store.insert_import(file_id, to_module, import_name)
 
             for caller_qn, callee_name in parse_result.edges.calls:
+                if _is_noise_call(callee_name):
+                    continue
                 caller_id = (
                     parent_id_map.get(caller_qn)
                     or qualified_to_id.get(caller_qn)
@@ -272,3 +274,88 @@ def _file_hash(path: Path) -> str:
     h = hashlib.sha256()
     h.update(path.read_bytes())
     return h.hexdigest()
+
+
+# --------------------------------------------------------------------------- #
+# Call-graph noise filter
+# --------------------------------------------------------------------------- #
+
+# Python builtins and common exception constructors
+_BUILTIN_NAMES: frozenset[str] = frozenset(
+    # functions
+    "len any all isinstance issubclass print range int str list dict set tuple "
+    "type super max min sorted zip map filter next iter open enumerate hasattr "
+    "getattr setattr delattr repr hash id abs round sum bool float bytes chr "
+    "ord hex oct bin format reversed input vars dir callable staticmethod "
+    "classmethod property frozenset complex memoryview bytearray object slice "
+    # stdlib constructors commonly used as calls
+    "Path "
+    # exception types
+    "ValueError TypeError RuntimeError KeyError AttributeError ImportError "
+    "FileNotFoundError OSError Exception StopIteration NotImplementedError "
+    "IndexError NameError IOError PermissionError TimeoutError "
+    "AssertionError ZeroDivisionError OverflowError RecursionError "
+    "UnicodeDecodeError UnicodeEncodeError".split()
+)
+
+# Methods commonly found on built-in types (list, dict, str, set, Path, etc.)
+_BUILTIN_METHODS: frozenset[str] = frozenset(
+    # list / deque
+    "append extend insert remove pop clear copy sort reverse count index "
+    # dict
+    "get items keys values update setdefault popitem fromkeys "
+    # set
+    "add discard union intersection difference symmetric_difference "
+    "issubset issuperset "
+    # str
+    "strip lstrip rstrip split rsplit join replace startswith endswith "
+    "lower upper find rfind encode decode format center ljust rjust zfill "
+    "title capitalize swapcase isdigit isalpha isalnum isupper islower "
+    "removeprefix removesuffix partition rpartition expandtabs "
+    # bytes
+    "hex "
+    # pathlib.Path
+    "exists mkdir resolve is_absolute relative_to stat read_text read_bytes "
+    "write_text write_bytes is_file is_dir glob rglob suffix stem parent "
+    # hashlib
+    "hexdigest digest "
+    # file / io
+    "read write close flush seek tell readline readlines writelines "
+    # sqlite3 cursor/connection
+    "fetchone fetchall fetchmany execute executemany executescript commit "
+    "rollback "
+    # httpx / requests response
+    "raise_for_status json "
+    # generic iteration / context
+    "visit generic_visit ".split()
+)
+
+# Known stdlib / third-party module prefixes — calls into these are external
+_EXTERNAL_PREFIXES: tuple[str, ...] = (
+    "ast.", "os.", "sys.", "json.", "re.", "hashlib.", "shutil.", "logging.",
+    "importlib.", "asyncio.", "pathlib.", "sqlite_vec.", "click.", "pytest.",
+    "httpx.", "math.", "collections.", "functools.", "itertools.", "typing.",
+    "subprocess.", "threading.", "multiprocessing.", "socket.", "urllib.",
+    "contextlib.", "dataclasses.", "inspect.", "textwrap.", "fnmatch.",
+)
+
+
+def _is_noise_call(callee_name: str) -> bool:
+    """Return True if *callee_name* is a call to a builtin, stdlib, or
+    external dependency that will never resolve to a project symbol."""
+    # Simple name: check builtins and builtin type methods
+    if callee_name in _BUILTIN_NAMES or callee_name in _BUILTIN_METHODS:
+        return True
+
+    # Dotted name: check module prefix and suffix
+    if "." in callee_name:
+        # Known external module prefix
+        for prefix in _EXTERNAL_PREFIXES:
+            if callee_name.startswith(prefix):
+                return True
+        # Last component is a builtin method (e.g. self.items.append)
+        suffix = callee_name.rsplit(".", 1)[-1]
+        if suffix in _BUILTIN_METHODS:
+            return True
+
+    return False

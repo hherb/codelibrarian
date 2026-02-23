@@ -10,7 +10,7 @@ Codelibrarian parses your source files into a SQLite database with:
 
 - **Symbol extraction** — functions, methods, classes, and modules with full signatures, docstrings, parameters, decorators, and return types
 - **Hybrid search** — combines semantic vector search (via embeddings) with BM25 full-text search for ranked results
-- **Call graph** — tracks which functions call which, traversable to arbitrary depth
+- **Call graph** — tracks which functions call which, traversable to arbitrary depth. Automatically filters out noise (builtins, stdlib, external dependencies) so only project-internal calls appear
 - **Inheritance hierarchy** — maps parent/child class relationships
 - **Import graph** — shows what each file imports and what imports it
 - **Incremental indexing** — only re-indexes files that have changed (SHA256 hash comparison)
@@ -137,6 +137,12 @@ codelibrarian search QUERY [--limit N] [--semantic-only] [--text-only] [--path D
 
 codelibrarian lookup NAME [--path DIR]
     Show full details for a symbol by name or qualified name.
+
+codelibrarian callers NAME [--depth N] [--path DIR]
+    Find all functions/methods that call the named symbol.
+
+codelibrarian callees NAME [--depth N] [--path DIR]
+    Find all functions/methods called by the named symbol.
 
 codelibrarian status [--path DIR]
     Display index statistics (files, symbols by kind, embeddings).
