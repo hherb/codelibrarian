@@ -34,15 +34,21 @@ class Searcher:
             query_vec = self.embedder.embed_one(query)
             if query_vec:
                 for sym_id, dist in self.store.vector_search(query_vec, limit=limit * 2):
-                    # Convert distance to a 0-1 similarity score
-                    vec_hits[sym_id] = max(0.0, 1.0 - dist)
+                    # Cosine distance ranges from 0 (identical) to 2 (opposite).
+                    # Convert to a 0-1 similarity score.
+                    vec_hits[sym_id] = max(0.0, 1.0 - dist / 2.0)
 
         if not semantic_only:
-            # Escape FTS5 special characters
-            safe_query = _escape_fts5(query)
+            safe_query = _fts5_query(query)
             if safe_query:
                 for sym_id, score in self.store.fts_search(safe_query, limit=limit * 2):
                     fts_hits[sym_id] = min(score / _BM25_SCALE, 1.0)
+            # If AND matched nothing, fall back to OR so partial matches surface
+            if not fts_hits:
+                or_query = _fts5_query(query, use_or=True)
+                if or_query and or_query != safe_query:
+                    for sym_id, score in self.store.fts_search(or_query, limit=limit * 2):
+                        fts_hits[sym_id] = min(score / _BM25_SCALE, 1.0)
 
         # Merge scores
         all_ids = set(fts_hits) | set(vec_hits)
@@ -113,15 +119,44 @@ class Searcher:
 # Helpers
 # --------------------------------------------------------------------------- #
 
-def _escape_fts5(query: str) -> str:
-    """Escape FTS5 special characters; fall back to quoted phrase if needed."""
-    # Remove characters that can't be easily escaped in FTS5
+_STOP_WORDS = frozenset({
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "do", "does", "did", "has", "have", "had", "having",
+    "i", "me", "my", "we", "our", "you", "your", "he", "she", "it", "its",
+    "they", "them", "their", "this", "that", "these", "those",
+    "in", "on", "at", "to", "for", "of", "with", "by", "from", "as",
+    "into", "about", "between", "through", "during", "above", "below",
+    "and", "or", "but", "not", "nor", "so", "yet",
+    "if", "then", "else", "when", "where", "how", "what", "which", "who",
+    "whom", "why", "all", "each", "every", "both", "few", "more", "most",
+    "some", "any", "no", "only", "very", "can", "will", "just",
+})
+
+
+def _fts5_query(query: str, *, use_or: bool = False) -> str:
+    """Convert a natural-language query into safe FTS5 search tokens.
+
+    Strips punctuation, removes stop words, and quotes each remaining token
+    individually.  By default tokens are joined with implicit AND; pass
+    *use_or=True* to join with OR so that partial matches are returned.
+    """
+    import re
+
     stripped = query.strip()
     if not stripped:
         return ""
-    # If the query has special FTS5 operators, wrap in quotes for phrase search
-    special = set('"-*()^')
-    if any(c in stripped for c in special):
-        escaped = stripped.replace('"', '""')
+    # Split on non-alphanumeric characters (keeps underscores for identifiers)
+    tokens = re.split(r"[^\w]+", stripped)
+    # Remove stop words and empty tokens
+    tokens = [t for t in tokens if t and t.lower() not in _STOP_WORDS]
+    if not tokens:
+        # All tokens were stop words; fall back to the original minus punctuation
+        fallback = re.sub(r"[^\w\s]+", "", stripped)
+        if not fallback.strip():
+            return ""
+        escaped = fallback.replace('"', '""')
         return f'"{escaped}"'
-    return stripped
+    quoted = [f'"{t}"' for t in tokens]
+    if use_or and len(quoted) > 1:
+        return " OR ".join(quoted)
+    return " ".join(quoted)
