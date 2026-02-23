@@ -250,6 +250,72 @@ def lookup(name: str, path: str | None):
 
 
 # --------------------------------------------------------------------------- #
+# callers / callees
+# --------------------------------------------------------------------------- #
+
+@main.command()
+@click.argument("name")
+@click.option("--depth", "-d", default=1, help="Call-graph hops to traverse")
+@click.option("--path", default=None, help="Project root")
+def callers(name: str, depth: int, path: str | None):
+    """Find all functions/methods that call the named symbol."""
+    root = Path(path).resolve() if path else None
+    config = Config.load(root) if root else Config.load_from_cwd()
+
+    if not config.db_path.exists():
+        click.echo("No index found. Run 'codelibrarian init && codelibrarian index' first.")
+        sys.exit(1)
+
+    from codelibrarian.searcher import Searcher
+    from codelibrarian.storage.store import SQLiteStore
+
+    with SQLiteStore(config.db_path, config.embedding_dimensions) as store:
+        searcher = Searcher(store)
+        results = searcher.get_callers(name, depth=depth)
+
+    if not results:
+        click.echo(f"No callers found for '{name}'.")
+        return
+
+    click.echo(f"{'Kind':<10}  {'Symbol':<45}  Location")
+    click.echo("-" * 80)
+    for sym in results:
+        location = f"{sym.relative_path}:{sym.line_start}"
+        click.echo(f"{sym.kind:<10}  {sym.qualified_name:<45}  {location}")
+
+
+@main.command()
+@click.argument("name")
+@click.option("--depth", "-d", default=1, help="Call-graph hops to traverse")
+@click.option("--path", default=None, help="Project root")
+def callees(name: str, depth: int, path: str | None):
+    """Find all functions/methods called by the named symbol."""
+    root = Path(path).resolve() if path else None
+    config = Config.load(root) if root else Config.load_from_cwd()
+
+    if not config.db_path.exists():
+        click.echo("No index found. Run 'codelibrarian init && codelibrarian index' first.")
+        sys.exit(1)
+
+    from codelibrarian.searcher import Searcher
+    from codelibrarian.storage.store import SQLiteStore
+
+    with SQLiteStore(config.db_path, config.embedding_dimensions) as store:
+        searcher = Searcher(store)
+        results = searcher.get_callees(name, depth=depth)
+
+    if not results:
+        click.echo(f"No callees found for '{name}'.")
+        return
+
+    click.echo(f"{'Kind':<10}  {'Symbol':<45}  Location")
+    click.echo("-" * 80)
+    for sym in results:
+        location = f"{sym.relative_path}:{sym.line_start}"
+        click.echo(f"{sym.kind:<10}  {sym.qualified_name:<45}  {location}")
+
+
+# --------------------------------------------------------------------------- #
 # hooks
 # --------------------------------------------------------------------------- #
 

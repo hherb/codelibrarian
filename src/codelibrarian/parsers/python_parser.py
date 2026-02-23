@@ -124,9 +124,13 @@ class _Visitor(ast.NodeVisitor):
         )
         self.symbols.append(sym)
 
-        # Extract calls within this function body
+        # Extract calls within this function body.
+        # We visit each body statement individually rather than the FunctionDef
+        # node itself, because _CallExtractor.visit_FunctionDef is a no-op
+        # (to avoid recursing into nested function definitions).
         call_extractor = _CallExtractor()
-        call_extractor.visit(node)
+        for stmt in node.body:
+            call_extractor.visit(stmt)
         for callee in call_extractor.calls:
             self.edges.calls.append((qualified, callee))
 

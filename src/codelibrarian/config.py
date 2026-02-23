@@ -29,7 +29,7 @@ DEFAULT_CONFIG = {
             "*.min.css",
             "*.lock",
         ],
-        "languages": ["python", "typescript", "javascript", "rust", "java", "cpp"],
+        "languages": ["python", "typescript", "javascript", "rust", "java", "cpp", "swift", "kotlin"],
     },
     "embeddings": {
         "api_url": "http://localhost:11434/v1/embeddings",
@@ -60,6 +60,9 @@ LANGUAGE_EXTENSIONS: dict[str, str] = {
     ".c": "cpp",
     ".h": "cpp",
     ".hpp": "cpp",
+    ".swift": "swift",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
 }
 
 
@@ -184,7 +187,7 @@ exclude = [
     ".codelibrarian/",
     "*.min.js",
 ]
-languages = ["python", "typescript", "javascript", "rust", "java", "cpp"]
+languages = ["python", "typescript", "javascript", "rust", "java", "cpp", "swift", "kotlin"]
 
 [embeddings]
 api_url    = "http://localhost:11434/v1/embeddings"

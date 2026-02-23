@@ -46,6 +46,12 @@ def _load_language(lang: str) -> Language | None:
                 language = Language(mod.language())
             except ImportError:
                 return None
+        elif lang == "swift":
+            import tree_sitter_swift as mod
+            language = Language(mod.language())
+        elif lang == "kotlin":
+            import tree_sitter_kotlin as mod
+            language = Language(mod.language())
         else:
             return None
 
@@ -608,5 +614,8 @@ class TreeSitterParser(BaseParser):
             ".c": "cpp",
             ".h": "cpp",
             ".hpp": "cpp",
+            ".swift": "swift",
+            ".kt": "kotlin",
+            ".kts": "kotlin",
         }
         return ext_map.get(file_path.suffix.lower())

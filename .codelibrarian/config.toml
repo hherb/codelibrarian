@@ -1,0 +1,24 @@
+[index]
+root = "."
+exclude = [
+    "node_modules/",
+    ".git/",
+    "__pycache__/",
+    "dist/",
+    "build/",
+    ".codelibrarian/",
+    ".venv/",
+    "*.min.js",
+]
+languages = ["python", "typescript", "javascript", "rust", "java", "cpp"]
+
+[embeddings]
+api_url    = "http://localhost:11434/v1/embeddings"
+model      = "nomic-embed-text-v2-moe"
+dimensions = 768
+batch_size = 32
+max_chars  = 1600
+enabled    = true
+
+[database]
+path = ".codelibrarian/index.db"

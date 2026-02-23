@@ -13,7 +13,7 @@ _treesitter_parser = TreeSitterParser()
 def get_parser(language: str) -> BaseParser | None:
     if language == "python":
         return _python_parser
-    if language in ("typescript", "javascript", "rust", "java", "cpp"):
+    if language in ("typescript", "javascript", "rust", "java", "cpp", "swift", "kotlin"):
         return _treesitter_parser
     return None
 

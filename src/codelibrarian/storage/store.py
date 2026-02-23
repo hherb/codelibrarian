@@ -237,6 +237,24 @@ class SQLiteStore:
 
     def delete_file_symbols(self, file_id: int) -> None:
         self.conn.execute("DELETE FROM imports WHERE from_file_id = ?", (file_id,))
+        # Clear resolved FK references from other tables pointing to symbols
+        # in this file, so that deleting symbols doesn't violate FKs.
+        self.conn.execute(
+            "UPDATE calls SET callee_id = NULL WHERE callee_id IN "
+            "(SELECT id FROM symbols WHERE file_id = ?)",
+            (file_id,),
+        )
+        self.conn.execute(
+            "UPDATE inherits SET parent_id = NULL WHERE parent_id IN "
+            "(SELECT id FROM symbols WHERE file_id = ?)",
+            (file_id,),
+        )
+        # Delete child symbols first (those with parent_id set) to avoid
+        # FK violations from the self-referencing parent_id column.
+        self.conn.execute(
+            "DELETE FROM symbols WHERE file_id = ? AND parent_id IS NOT NULL",
+            (file_id,),
+        )
         self.conn.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
 
     def get_file_id(self, path: str) -> int | None:
