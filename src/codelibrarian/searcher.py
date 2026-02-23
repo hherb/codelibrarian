@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from codelibrarian.embeddings import EmbeddingClient
 from codelibrarian.models import SearchResult, SymbolRecord
 from codelibrarian.storage.store import SQLiteStore
@@ -140,12 +142,9 @@ def _fts5_query(query: str, *, use_or: bool = False) -> str:
     individually.  By default tokens are joined with implicit AND; pass
     *use_or=True* to join with OR so that partial matches are returned.
     """
-    import re
-
     stripped = query.strip()
     if not stripped:
         return ""
-    # Split on non-alphanumeric characters (keeps underscores for identifiers)
     tokens = re.split(r"[^\w]+", stripped)
     # Remove stop words and empty tokens
     tokens = [t for t in tokens if t and t.lower() not in _STOP_WORDS]
@@ -160,3 +159,46 @@ def _fts5_query(query: str, *, use_or: bool = False) -> str:
     if use_or and len(quoted) > 1:
         return " OR ".join(quoted)
     return " ".join(quoted)
+
+
+# --------------------------------------------------------------------------- #
+# Intent classification
+# --------------------------------------------------------------------------- #
+
+# Each tuple: (compiled regex, intent name, group index for symbol name).
+# Patterns are tried in order; first match wins.
+_INTENT_PATTERNS: list[tuple[re.Pattern, str, int]] = [
+    # -- callees --
+    (re.compile(r"(?:what|which\s+\w+)\s+(?:does|did)\s+([\w.]+)\s+call", re.I), "callees", 1),
+    (re.compile(r"(?:functions?|methods?|symbols?)?\s*called\s+by\s+([\w.]+)", re.I), "callees", 1),
+    (re.compile(r"callees?\s+(?:of|for)\s+([\w.]+)", re.I), "callees", 1),
+    (re.compile(r"([\w.]+)\s+calls\s+what", re.I), "callees", 1),
+    (re.compile(r"dependencies\s+of\s+([\w.]+)", re.I), "callees", 1),
+    # -- callers --
+    (re.compile(r"(?:who|what)\s+calls?\s+([\w.]+)", re.I), "callers", 1),
+    (re.compile(r"callers?\s+(?:of|for)\s+([\w.]+)", re.I), "callers", 1),
+    (re.compile(r"where\s+is\s+([\w.]+)\s+(?:used|called|invoked)", re.I), "callers", 1),
+    (re.compile(r"usages?\s+of\s+([\w.]+)", re.I), "callers", 1),
+    # -- hierarchy --
+    (re.compile(r"subclass(?:es)?\s+of\s+([\w.]+)", re.I), "hierarchy", 1),
+    (re.compile(r"([\w.]+)\s+inherits?\s+from", re.I), "hierarchy", 1),
+    (re.compile(r"parent\s+class(?:es)?\s+of\s+([\w.]+)", re.I), "hierarchy", 1),
+    (re.compile(r"children\s+of\s+([\w.]+)", re.I), "hierarchy", 1),
+    (re.compile(r"(?:super|base)\s*class(?:es)?\s+of\s+([\w.]+)", re.I), "hierarchy", 1),
+]
+
+
+def _classify_intent(query: str) -> tuple[str, str] | None:
+    """Classify a natural-language query as a graph intent.
+
+    Returns (intent, symbol_name) if a graph pattern matches, None otherwise.
+    Intent is one of: "callers", "callees", "hierarchy".
+    """
+    query = query.strip()
+    if not query:
+        return None
+    for pattern, intent, group_idx in _INTENT_PATTERNS:
+        m = pattern.search(query)
+        if m:
+            return (intent, m.group(group_idx))
+    return None
