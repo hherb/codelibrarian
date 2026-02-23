@@ -238,12 +238,16 @@ class Indexer:
             self.store.conn.commit()
 
         count = 0
+        batch_num = 0
         while True:
             pending = self.store.symbols_without_embeddings(
                 limit=self.config.embedding_batch_size * 4
             )
             if not pending:
                 break
+
+            batch_num += 1
+            self.progress(f"Embedding batch {batch_num} ({len(pending)} symbols)")
 
             ids = [row[0] for row in pending]
             texts = [

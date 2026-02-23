@@ -50,9 +50,10 @@ class Searcher:
         for sym_id in all_ids:
             fts_score = fts_hits.get(sym_id, 0.0)
             vec_score = vec_hits.get(sym_id, 0.0)
-            combined = (fts_score + vec_score) / (
-                (1 if fts_score > 0 else 0) + (1 if vec_score > 0 else 0)
-            )
+            n_sources = (1 if fts_score > 0 else 0) + (1 if vec_score > 0 else 0)
+            if n_sources == 0:
+                continue
+            combined = (fts_score + vec_score) / n_sources
             if fts_score > 0 and vec_score > 0:
                 match_type = "hybrid"
             elif fts_score > 0:
