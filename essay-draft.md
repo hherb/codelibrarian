@@ -147,4 +147,4 @@ Your codebase has a lot of code. It should be organized too.
 
 ---
 
-*Codelibrarian is open source under the Apache 2.0 license. Get it at [github.com/hherb/codelibrarian](https://github.com/hherb/codelibrarian).*
+*Codelibrarian is open source under the AGPL 3.0 license. Get it at [github.com/hherb/codelibrarian](https://github.com/hherb/codelibrarian).*
