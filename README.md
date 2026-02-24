@@ -16,6 +16,30 @@ Codelibrarian parses your source files into a SQLite database with:
 - **Inheritance hierarchy** — maps parent/child class relationships
 - **Import graph** — shows what each file imports and what imports it
 - **Incremental indexing** — only re-indexes files that have changed (SHA256 hash comparison)
+- **Mermaid diagrams** — generates class hierarchy, call graph, and module import diagrams in Mermaid syntax, renderable in GitHub, VS Code, and any markdown tool
+
+## Diagrams
+
+Codelibrarian can generate Mermaid diagrams directly from the index — no additional dependencies required. Output is Mermaid text that renders natively in GitHub markdown, VS Code preview, and most documentation tools.
+
+```bash
+# Class hierarchy with methods, parents, and children
+codelibrarian diagram class Animal
+
+# Call graph: what does index_root call, 2 hops deep
+codelibrarian diagram calls index_root --depth 2
+
+# Call graph: what calls process_payment (reverse direction)
+codelibrarian diagram calls process_payment --direction callers
+
+# Module import dependencies (whole project)
+codelibrarian diagram imports
+
+# Module import dependencies (scoped to one file)
+codelibrarian diagram imports --file src/codelibrarian/searcher.py
+```
+
+The same diagrams are available via MCP tools (`generate_class_diagram`, `generate_call_graph`, `generate_import_graph`), so any LLM client can request them.
 
 ## Supported Languages
 
@@ -108,6 +132,9 @@ The server runs on stdio and provides these tools:
 | `get_file_imports` | Show a file's imports and reverse imports |
 | `list_symbols` | Filter symbols by kind, name pattern, or file |
 | `get_class_hierarchy` | Get inheritance tree for a class |
+| `generate_class_diagram` | Generate a Mermaid class hierarchy diagram |
+| `generate_call_graph` | Generate a Mermaid call graph diagram |
+| `generate_import_graph` | Generate a Mermaid module import dependency diagram |
 
 ### Claude Desktop Configuration
 
@@ -154,6 +181,15 @@ codelibrarian status [--path DIR]
 codelibrarian hooks install [--path DIR]
     Install git post-commit and post-merge hooks for automatic
     incremental reindexing after each commit.
+
+codelibrarian diagram class NAME [--path DIR]
+    Generate a Mermaid class hierarchy diagram.
+
+codelibrarian diagram calls NAME [--depth N] [--direction callees|callers] [--path DIR]
+    Generate a Mermaid call graph diagram.
+
+codelibrarian diagram imports [--file PATH] [--path DIR]
+    Generate a Mermaid module import dependency diagram.
 
 codelibrarian serve [--path DIR]
     Start the MCP server on stdio.
