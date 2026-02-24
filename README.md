@@ -246,4 +246,4 @@ This installs `post-commit` and `post-merge` hooks that run `codelibrarian index
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+AGPL 3.0 — see [LICENSE](LICENSE).
