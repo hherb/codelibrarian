@@ -4,6 +4,8 @@ A self-maintaining code index for LLM and human queries via MCP and CLI.
 
 Codelibrarian indexes your codebase — functions, methods, classes, modules — and lets you search it with natural language or keywords. It builds call graphs, tracks inheritance hierarchies, and maps import dependencies. Results are available through an MCP server (for LLM clients like Claude) or a command-line interface.
 
+![Codelibrarian](assets/codelibrarian.png)
+
 ## How It Works
 
 Codelibrarian parses your source files into a SQLite database with:
