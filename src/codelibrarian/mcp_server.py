@@ -218,6 +218,67 @@ def _make_server(config: Config) -> tuple[Server, SQLiteStore, EmbeddingClient |
                     "required": ["qualified_name"],
                 },
             ),
+            Tool(
+                name="generate_class_diagram",
+                description=(
+                    "Generate a Mermaid class hierarchy diagram for a given class, "
+                    "showing parents, children, and methods."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "class_name": {
+                            "type": "string",
+                            "description": "Class name or qualified class name",
+                        }
+                    },
+                    "required": ["class_name"],
+                },
+            ),
+            Tool(
+                name="generate_call_graph",
+                description=(
+                    "Generate a Mermaid call graph diagram rooted at a function/method, "
+                    "showing caller or callee relationships."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "qualified_name": {
+                            "type": "string",
+                            "description": "Qualified name of the root symbol",
+                        },
+                        "depth": {
+                            "type": "integer",
+                            "default": 2,
+                            "description": "Number of hops to traverse",
+                        },
+                        "direction": {
+                            "type": "string",
+                            "enum": ["callees", "callers"],
+                            "default": "callees",
+                            "description": "Traverse forward (callees) or backward (callers)",
+                        },
+                    },
+                    "required": ["qualified_name"],
+                },
+            ),
+            Tool(
+                name="generate_import_graph",
+                description=(
+                    "Generate a Mermaid diagram of file-to-file import dependencies, "
+                    "optionally scoped to a single file."
+                ),
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Optional file path to scope the graph to",
+                        }
+                    },
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -309,6 +370,25 @@ def _dispatch(
             (qn, qn),
         ).fetchone()
         return {"count": row["cnt"] if row else 0, "qualified_name": qn}
+
+    elif name == "generate_class_diagram":
+        from codelibrarian.diagrams import mermaid_class_diagram
+        result = mermaid_class_diagram(searcher.store, args["class_name"])
+        return {"mermaid": result} if result else {"error": "Class not found"}
+
+    elif name == "generate_call_graph":
+        from codelibrarian.diagrams import mermaid_call_graph
+        depth = int(args.get("depth", 2))
+        direction = args.get("direction", "callees")
+        result = mermaid_call_graph(
+            searcher.store, args["qualified_name"], depth=depth, direction=direction
+        )
+        return {"mermaid": result} if result else {"error": "Symbol not found or no edges"}
+
+    elif name == "generate_import_graph":
+        from codelibrarian.diagrams import mermaid_import_graph
+        result = mermaid_import_graph(searcher.store, file_path=args.get("file_path"))
+        return {"mermaid": result} if result else {"error": "No import edges found"}
 
     else:
         raise ValueError(f"Unknown tool: {name}")

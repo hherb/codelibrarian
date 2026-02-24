@@ -376,6 +376,94 @@ fi
 
 
 # --------------------------------------------------------------------------- #
+# diagram
+# --------------------------------------------------------------------------- #
+
+@main.group()
+def diagram():
+    """Generate Mermaid diagrams from the code index."""
+
+
+@diagram.command("class")
+@click.argument("name")
+@click.option("--path", default=None, help="Project root")
+def diagram_class(name: str, path: str | None):
+    """Generate a class hierarchy diagram in Mermaid syntax."""
+    root = Path(path).resolve() if path else None
+    config = Config.load(root) if root else Config.load_from_cwd()
+
+    if not config.db_path.exists():
+        click.echo("No index found. Run 'codelibrarian init && codelibrarian index' first.")
+        sys.exit(1)
+
+    from codelibrarian.diagrams import mermaid_class_diagram
+    from codelibrarian.storage.store import SQLiteStore
+
+    with SQLiteStore(config.db_path, config.embedding_dimensions) as store:
+        result = mermaid_class_diagram(store, name)
+
+    if not result:
+        click.echo(f"Class '{name}' not found in index.")
+        sys.exit(1)
+    click.echo(result)
+
+
+@diagram.command("calls")
+@click.argument("name")
+@click.option("--depth", "-d", default=2, help="Call-graph hops to traverse")
+@click.option(
+    "--direction",
+    type=click.Choice(["callees", "callers"]),
+    default="callees",
+    help="Traverse callees (forward) or callers (backward)",
+)
+@click.option("--path", default=None, help="Project root")
+def diagram_calls(name: str, depth: int, direction: str, path: str | None):
+    """Generate a call graph diagram in Mermaid syntax."""
+    root = Path(path).resolve() if path else None
+    config = Config.load(root) if root else Config.load_from_cwd()
+
+    if not config.db_path.exists():
+        click.echo("No index found. Run 'codelibrarian init && codelibrarian index' first.")
+        sys.exit(1)
+
+    from codelibrarian.diagrams import mermaid_call_graph
+    from codelibrarian.storage.store import SQLiteStore
+
+    with SQLiteStore(config.db_path, config.embedding_dimensions) as store:
+        result = mermaid_call_graph(store, name, depth=depth, direction=direction)
+
+    if not result:
+        click.echo(f"Symbol '{name}' not found or has no call edges.")
+        sys.exit(1)
+    click.echo(result)
+
+
+@diagram.command("imports")
+@click.option("--file", "file_path", default=None, help="Scope to a single file")
+@click.option("--path", default=None, help="Project root")
+def diagram_imports(file_path: str | None, path: str | None):
+    """Generate a module import graph diagram in Mermaid syntax."""
+    root = Path(path).resolve() if path else None
+    config = Config.load(root) if root else Config.load_from_cwd()
+
+    if not config.db_path.exists():
+        click.echo("No index found. Run 'codelibrarian init && codelibrarian index' first.")
+        sys.exit(1)
+
+    from codelibrarian.diagrams import mermaid_import_graph
+    from codelibrarian.storage.store import SQLiteStore
+
+    with SQLiteStore(config.db_path, config.embedding_dimensions) as store:
+        result = mermaid_import_graph(store, file_path=file_path)
+
+    if not result:
+        click.echo("No import edges found in index.")
+        sys.exit(1)
+    click.echo(result)
+
+
+# --------------------------------------------------------------------------- #
 # serve
 # --------------------------------------------------------------------------- #
 

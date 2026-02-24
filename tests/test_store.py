@@ -252,3 +252,95 @@ def test_stats(store):
     assert s["files"] == 1
     assert s["symbols"]["function"] == 1
     assert s["symbols"]["class"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# Edge queries for diagrams
+# --------------------------------------------------------------------------- #
+
+
+def test_get_call_edges(store):
+    fid = store.upsert_file("/a/b.py", "b.py", "python", 1.0, "x")
+    a = _make_symbol("a_fn", "m.a_fn", "function")
+    b = _make_symbol("b_fn", "m.b_fn", "function")
+    c = _make_symbol("c_fn", "m.c_fn", "function")
+    a_id = store.insert_symbol(a, fid, None)
+    b_id = store.insert_symbol(b, fid, None)
+    c_id = store.insert_symbol(c, fid, None)
+    store.conn.commit()
+
+    store.insert_call(a_id, "m.b_fn")
+    store.insert_call(b_id, "m.c_fn")
+    store.resolve_graph_edges()
+    store.conn.commit()
+
+    # depth=1: only direct calls from a_fn
+    edges = store.get_call_edges("m.a_fn", depth=1, direction="callees")
+    assert ("m.a_fn", "m.b_fn") in edges
+
+    # depth=2: transitive
+    edges = store.get_call_edges("m.a_fn", depth=2, direction="callees")
+    assert ("m.a_fn", "m.b_fn") in edges
+    assert ("m.b_fn", "m.c_fn") in edges
+
+    # callers direction
+    edges = store.get_call_edges("m.c_fn", depth=2, direction="callers")
+    assert ("m.a_fn", "m.b_fn") in edges
+    assert ("m.b_fn", "m.c_fn") in edges
+
+
+def test_get_all_import_edges(store):
+    fid1 = store.upsert_file("/a/mod_a.py", "mod_a.py", "python", 1.0, "x")
+    fid2 = store.upsert_file("/a/mod_b.py", "mod_b.py", "python", 1.0, "y")
+
+    store.insert_import(fid1, "mod_b")
+    store.conn.execute(
+        "UPDATE imports SET to_file_id = ? WHERE from_file_id = ? AND to_module = ?",
+        (fid2, fid1, "mod_b"),
+    )
+    store.conn.commit()
+
+    edges = store.get_all_import_edges()
+    assert ("mod_a.py", "mod_b.py") in edges
+
+
+def test_get_call_edges_cyclic(store):
+    """Mutual recursion (A->B->A) must not cause infinite CTE recursion."""
+    fid = store.upsert_file("/a/b.py", "b.py", "python", 1.0, "x")
+    a = _make_symbol("alpha", "m.alpha", "function")
+    b = _make_symbol("beta", "m.beta", "function")
+    a_id = store.insert_symbol(a, fid, None)
+    b_id = store.insert_symbol(b, fid, None)
+    store.conn.commit()
+
+    store.insert_call(a_id, "m.beta")
+    store.insert_call(b_id, "m.alpha")
+    store.resolve_graph_edges()
+    store.conn.commit()
+
+    # Should terminate without error
+    edges = store.get_call_edges("m.alpha", depth=5, direction="callees")
+    assert ("m.alpha", "m.beta") in edges
+    assert ("m.beta", "m.alpha") in edges
+
+
+def test_get_methods_for_class(store):
+    fid = store.upsert_file("/a/b.py", "b.py", "python", 1.0, "x")
+    cls = _make_symbol("MyClass", "m.MyClass", "class")
+    cls_id = store.insert_symbol(cls, fid, None)
+    m1 = _make_symbol("do_stuff", "m.MyClass.do_stuff", "method")
+    m2 = _make_symbol("helper", "m.MyClass.helper", "method")
+    store.insert_symbol(m1, fid, cls_id)
+    store.insert_symbol(m2, fid, cls_id)
+    # Unrelated method on another class
+    other_cls = _make_symbol("Other", "m.Other", "class")
+    other_id = store.insert_symbol(other_cls, fid, None)
+    m3 = _make_symbol("unrelated", "m.Other.unrelated", "method")
+    store.insert_symbol(m3, fid, other_id)
+    store.conn.commit()
+
+    methods = store.get_methods_for_class("m.MyClass")
+    names = [m.name for m in methods]
+    assert "do_stuff" in names
+    assert "helper" in names
+    assert "unrelated" not in names

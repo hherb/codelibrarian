@@ -380,6 +380,21 @@ class SQLiteStore:
         ).fetchall()
         return [SymbolRecord.from_row(dict(r)) for r in rows]
 
+    def get_methods_for_class(self, class_qualified_name: str) -> list[SymbolRecord]:
+        """Return all methods belonging to a class, by parent qualified name."""
+        rows = self.conn.execute(
+            """
+            SELECT s.*, f.path, f.relative_path
+            FROM symbols s
+            JOIN files f ON s.file_id = f.id
+            JOIN symbols parent ON s.parent_id = parent.id
+            WHERE parent.qualified_name = ? AND s.kind = 'method'
+            ORDER BY s.name
+            """,
+            (class_qualified_name,),
+        ).fetchall()
+        return [SymbolRecord.from_row(dict(r)) for r in rows]
+
     # ------------------------------------------------------------------ #
     # Full-text search
     # ------------------------------------------------------------------ #
@@ -587,6 +602,89 @@ class SQLiteStore:
             (qualified_name, qualified_name, depth),
         ).fetchall()
         return [SymbolRecord.from_row(dict(r)) for r in rows]
+
+    def get_call_edges(
+        self,
+        qualified_name: str,
+        depth: int = 1,
+        direction: str = "callees",
+    ) -> list[tuple[str, str]]:
+        """Return directed (caller_qname, callee_qname) edge pairs.
+
+        *direction* is ``"callees"`` (forward from the root) or ``"callers"``
+        (backward to the root).
+
+        The depth limit is enforced by collecting the set of reachable
+        *node* IDs via a depth-bounded CTE (which naturally deduplicates
+        and terminates on cycles because ``UNION`` drops duplicate rows),
+        then selecting all call edges that fall entirely within that set.
+        """
+        if direction == "callees":
+            # First: collect all node IDs reachable within `depth` hops
+            rows = self.conn.execute(
+                """
+                WITH RECURSIVE reachable(id, d) AS (
+                    SELECT s.id, 0
+                    FROM symbols s
+                    WHERE s.qualified_name = ? OR s.name = ?
+                    UNION
+                    SELECT c.callee_id, r.d + 1
+                    FROM calls c
+                    JOIN reachable r ON c.caller_id = r.id
+                    WHERE r.d < ? AND c.callee_id IS NOT NULL
+                )
+                SELECT DISTINCT
+                    s1.qualified_name AS caller_qname,
+                    s2.qualified_name AS callee_qname
+                FROM calls c
+                JOIN reachable r1 ON c.caller_id = r1.id
+                JOIN reachable r2 ON c.callee_id = r2.id
+                JOIN symbols s1 ON c.caller_id = s1.id
+                JOIN symbols s2 ON c.callee_id = s2.id
+                WHERE c.callee_id IS NOT NULL
+                """,
+                (qualified_name, qualified_name, depth),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                """
+                WITH RECURSIVE reachable(id, d) AS (
+                    SELECT s.id, 0
+                    FROM symbols s
+                    WHERE s.qualified_name = ? OR s.name = ?
+                    UNION
+                    SELECT c.caller_id, r.d + 1
+                    FROM calls c
+                    JOIN reachable r ON c.callee_id = r.id
+                    WHERE r.d < ? AND c.caller_id IS NOT NULL
+                )
+                SELECT DISTINCT
+                    s1.qualified_name AS caller_qname,
+                    s2.qualified_name AS callee_qname
+                FROM calls c
+                JOIN reachable r1 ON c.caller_id = r1.id
+                JOIN reachable r2 ON c.callee_id = r2.id
+                JOIN symbols s1 ON c.caller_id = s1.id
+                JOIN symbols s2 ON c.callee_id = s2.id
+                WHERE c.caller_id IS NOT NULL
+                """,
+                (qualified_name, qualified_name, depth),
+            ).fetchall()
+        return [(r["caller_qname"], r["callee_qname"]) for r in rows]
+
+    def get_all_import_edges(self) -> list[tuple[str, str]]:
+        """Return all resolved file-to-file import edges as (from_path, to_path)."""
+        rows = self.conn.execute(
+            """
+            SELECT DISTINCT f1.relative_path AS from_path, f2.relative_path AS to_path
+            FROM imports i
+            JOIN files f1 ON i.from_file_id = f1.id
+            JOIN files f2 ON i.to_file_id = f2.id
+            WHERE i.to_file_id IS NOT NULL
+            ORDER BY from_path, to_path
+            """
+        ).fetchall()
+        return [(r["from_path"], r["to_path"]) for r in rows]
 
     def get_file_imports(self, file_path: str) -> dict:
         file_id = self.get_file_id(file_path)
