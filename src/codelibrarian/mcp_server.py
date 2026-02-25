@@ -17,7 +17,7 @@ from codelibrarian.storage.store import SQLiteStore
 import json
 
 
-def _make_server(config: Config) -> tuple[Server, SQLiteStore, EmbeddingClient | None]:
+def _make_server(config: Config) -> tuple[Server, SQLiteStore, EmbeddingClient | None, "QueryRewriter | None"]:
     store = SQLiteStore(config.db_path, config.embedding_dimensions)
     store.connect()
 
@@ -31,7 +31,17 @@ def _make_server(config: Config) -> tuple[Server, SQLiteStore, EmbeddingClient |
             max_chars=config.embedding_max_chars,
         )
 
-    searcher = Searcher(store, embedder)
+    rewriter = None
+    if config.query_rewrite_enabled:
+        from codelibrarian.query_rewriter import QueryRewriter
+
+        rewriter = QueryRewriter(
+            api_url=config.query_rewrite_api_url,
+            model=config.query_rewrite_model,
+            timeout=config.query_rewrite_timeout,
+        )
+
+    searcher = Searcher(store, embedder, rewriter=rewriter)
     server = Server("codelibrarian")
 
     # ------------------------------------------------------------------ #
@@ -65,6 +75,11 @@ def _make_server(config: Config) -> tuple[Server, SQLiteStore, EmbeddingClient |
                             "enum": ["hybrid", "semantic", "fulltext"],
                             "default": "hybrid",
                             "description": "Search mode",
+                        },
+                        "rewrite": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": "Force LLM-based query rewriting for better natural language understanding",
                         },
                     },
                     "required": ["query"],
@@ -289,7 +304,7 @@ def _make_server(config: Config) -> tuple[Server, SQLiteStore, EmbeddingClient |
         except Exception as exc:
             return [TextContent(type="text", text=json.dumps({"error": str(exc)}))]
 
-    return server, store, embedder
+    return server, store, embedder, rewriter
 
 
 def _dispatch(
@@ -302,11 +317,13 @@ def _dispatch(
         query = args["query"]
         limit = int(args.get("limit", 10))
         mode = args.get("mode", "hybrid")
+        rewrite = bool(args.get("rewrite", False))
         results = searcher.search(
             query,
             limit=limit,
             semantic_only=(mode == "semantic"),
             text_only=(mode == "fulltext"),
+            rewrite=rewrite,
         )
         return [r.to_dict() for r in results]
 
@@ -401,7 +418,7 @@ async def run_server(project_root: Path | None = None) -> None:
         else Config.load_from_cwd()
     )
 
-    server, store, embedder = _make_server(config)
+    server, store, embedder, rewriter = _make_server(config)
     try:
         async with stdio_server() as (read_stream, write_stream):
             await server.run(
@@ -413,3 +430,5 @@ async def run_server(project_root: Path | None = None) -> None:
         store.close()
         if embedder:
             embedder.close()
+        if rewriter:
+            rewriter.close()
