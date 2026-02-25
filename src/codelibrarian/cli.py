@@ -148,8 +148,9 @@ def status(path: str | None):
 @click.option("--limit", "-n", default=10, help="Max results")
 @click.option("--semantic-only", is_flag=True)
 @click.option("--text-only", is_flag=True)
+@click.option("--rewrite", "-r", is_flag=True, help="Force LLM query rewriting")
 @click.option("--path", default=None, help="Project root")
-def search(query: str, limit: int, semantic_only: bool, text_only: bool, path: str | None):
+def search(query: str, limit: int, semantic_only: bool, text_only: bool, rewrite: bool, path: str | None):
     """Search the code index with a natural language or keyword query."""
     root = Path(path).resolve() if path else None
     config = Config.load(root) if root else Config.load_from_cwd()
@@ -171,17 +172,31 @@ def search(query: str, limit: int, semantic_only: bool, text_only: bool, path: s
             max_chars=config.embedding_max_chars,
         )
 
+    rewriter = None
+    if config.query_rewrite_enabled:
+        from codelibrarian.query_rewriter import QueryRewriter
+
+        rewriter = QueryRewriter(
+            api_url=config.query_rewrite_api_url,
+            model=config.query_rewrite_model,
+            timeout=config.query_rewrite_timeout,
+        )
+
     with SQLiteStore(config.db_path, config.embedding_dimensions) as store:
-        searcher = Searcher(store, embedder)
+        searcher = Searcher(store, embedder, rewriter=rewriter)
         results = searcher.search(
             query,
             limit=limit,
             semantic_only=semantic_only,
             text_only=text_only,
+            rewrite=rewrite,
         )
 
     if embedder:
         embedder.close()
+
+    if rewriter:
+        rewriter.close()
 
     if not results:
         click.echo("No results found.")
