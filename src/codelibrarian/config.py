@@ -42,6 +42,12 @@ DEFAULT_CONFIG = {
     "database": {
         "path": ".codelibrarian/index.db",
     },
+    "query_rewrite": {
+        "enabled": True,
+        "api_url": "http://localhost:11434/v1/chat/completions",
+        "model": "qwen2.5:3b",
+        "timeout": 5.0,
+    },
 }
 
 # File extensions mapped to language names
@@ -137,6 +143,25 @@ class Config:
             p = self.config_dir.parent / p
         return p
 
+    # --- query rewrite ---
+    @property
+    def query_rewrite_enabled(self) -> bool:
+        return self._data.get("query_rewrite", {}).get("enabled", True)
+
+    @property
+    def query_rewrite_api_url(self) -> str:
+        return self._data.get("query_rewrite", {}).get(
+            "api_url", "http://localhost:11434/v1/chat/completions"
+        )
+
+    @property
+    def query_rewrite_model(self) -> str:
+        return self._data.get("query_rewrite", {}).get("model", "qwen2.5:3b")
+
+    @property
+    def query_rewrite_timeout(self) -> float:
+        return self._data.get("query_rewrite", {}).get("timeout", 5.0)
+
     def is_excluded(self, path: Path) -> bool:
         path_str = str(path)
         for pattern in self.exclude_patterns:
@@ -199,4 +224,10 @@ enabled    = true
 
 [database]
 path = ".codelibrarian/index.db"
+
+[query_rewrite]
+enabled = true
+api_url = "http://localhost:11434/v1/chat/completions"
+model   = "qwen2.5:3b"
+timeout = 5.0
 """
