@@ -136,6 +136,62 @@ class TestRewrite:
         assert result.terms == ["foo", "bar"]
 
 
+    def test_vocabulary_included_in_prompt(self, rewriter):
+        """When vocabulary is provided, it should appear in the system prompt."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {"terms": ["insert_call", "GraphEdges"], "focus": "implementation"}
+                        )
+                    }
+                }
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        vocab = ["insert_call", "insert_import", "GraphEdges", "resolve_graph_edges"]
+        with patch.object(rewriter._client, "post", return_value=mock_response) as mock_post:
+            result = rewriter.rewrite("how are edges inserted?", vocabulary=vocab)
+
+        assert result is not None
+        # Verify the system prompt contained the vocabulary
+        call_args = mock_post.call_args
+        messages = call_args.kwargs.get("json", call_args[1].get("json", {}))["messages"]
+        system_msg = messages[0]["content"]
+        assert "insert_call" in system_msg
+        assert "GraphEdges" in system_msg
+
+    def test_rewrite_without_vocabulary(self, rewriter):
+        """When no vocabulary is provided, prompt should still work."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {"terms": ["edges", "insert"], "focus": "all"}
+                        )
+                    }
+                }
+            ]
+        }
+        mock_response.raise_for_status = MagicMock()
+
+        with patch.object(rewriter._client, "post", return_value=mock_response) as mock_post:
+            result = rewriter.rewrite("how are edges inserted?")
+
+        assert result is not None
+        call_args = mock_post.call_args
+        messages = call_args.kwargs.get("json", call_args[1].get("json", {}))["messages"]
+        system_msg = messages[0]["content"]
+        assert "Available symbols" not in system_msg
+
+
 class TestContextManager:
     def test_enters_and_exits(self):
         rw = QueryRewriter(
