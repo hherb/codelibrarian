@@ -90,20 +90,29 @@ Fast, no-I/O function that decides whether to invoke the LLM.
 
 ### Prompt Design
 
-System prompt (kept tight for a 3B model):
+The system prompt is vocabulary-aware: `Searcher` fetches the codebase's symbol
+names via `SQLiteStore.get_symbol_vocabulary()` and passes them to the rewriter.
+This lets the 3B model pick actual identifiers (like `insert_call`,
+`resolve_graph_edges`) instead of generic words (like `insert`, `graph`).
 
 ```
 You are a code search assistant. Given a natural language question about a codebase,
 return JSON with search terms a developer would use to find the relevant code.
 
+Available symbols in the codebase:
+Animal, AnimalShelter, BaseParser, ..., insert_call, insert_import, ...
+
 Return ONLY valid JSON:
 {"terms": ["term1", "term2", ...], "focus": "implementation"|"tests"|"all"}
 
 Rules:
-- terms: 3-6 short search terms (function names, variable names, SQL keywords, etc.)
+- terms: 3-6 search terms, preferring actual symbol names from the codebase
 - focus: "implementation" if asking about how code works, "tests" if asking about testing, "all" if unclear
 - No explanations, just JSON
 ```
+
+The vocabulary is cached on the `Searcher` instance (lazy-loaded once per session).
+Without vocabulary the prompt still works, just with less precise terms.
 
 User message is the raw query string.
 
@@ -113,7 +122,7 @@ User message is the raw query string.
 class QueryRewriter:
     def __init__(self, api_url: str, model: str, timeout: float = 5.0): ...
 
-    def rewrite(self, query: str) -> RewrittenQuery | None:
+    def rewrite(self, query: str, vocabulary: list[str] | None = None) -> RewrittenQuery | None:
         """Call LLM to rewrite query. Returns None on any failure."""
         ...
 
@@ -136,23 +145,33 @@ class RewrittenQuery:
 
 ### How Rewritten Terms Feed Into Search
 
-Rewritten terms are joined with spaces and passed through `_fts5_query()` for FTS,
-and concatenated into a single string for the embedding query. Reuses all existing
-search infrastructure — no changes to the store or vector search.
+Rewritten terms are searched with **OR mode** in FTS (each term is an independent
+symbol suggestion, not a conjunctive phrase). The results are **merged** with a
+parallel search using the original query:
+
+1. Search rewritten terms (OR mode FTS + embedding)
+2. Search original query (AND mode FTS + embedding, as before)
+3. Merge results: for duplicates, keep the higher score
+4. Apply focus multiplier
+5. Truncate to requested limit
+
+This dual-search approach ensures the LLM's code-vocabulary suggestions AND the
+original semantic match both contribute. The merge uses `limit * 3` candidates
+internally so focus adjustment has room to re-rank before truncation.
 
 ## Focus-Based Score Adjustment
 
 After hybrid search produces scored results, the `focus` value applies a multiplier:
 
-- `focus="implementation"`: test file scores × 0.7
-- `focus="tests"`: implementation file scores × 0.7
+- `focus="implementation"`: test file scores × 0.5
+- `focus="tests"`: implementation file scores × 0.5
 - `focus="all"`: no adjustment (default, and fallback if LLM skipped)
 
 `_is_test_file(path)` checks: path contains `tests/` or filename starts with
 `test_` or ends with `_test.py`. Standard Python conventions, extensible later.
 
-The 0.7 multiplier means test results can still appear — they just need to score
-~30% higher than implementation results to rank above them.
+The 0.5 multiplier means test results can still appear — they just need to score
+2× higher than implementation results to rank above them.
 
 ## Configuration
 
