@@ -16,7 +16,7 @@ Codelibrarian parses your source files into a SQLite database with:
 - **Inheritance hierarchy** — maps parent/child class relationships
 - **Import graph** — shows what each file imports and what imports it
 - **Incremental indexing** — only re-indexes files that have changed (SHA256 hash comparison)
-- **Mermaid diagrams** — generates class hierarchy, call graph, and module import diagrams in Mermaid syntax, renderable in GitHub, VS Code, and any markdown tool
+- **Mermaid diagrams** — generates class hierarchy, call graph, and module import diagrams in Mermaid syntax, renderable in GitHub, VS Code, and any markdown tool. Can also produce self-contained HTML pages with embedded Mermaid.js for offline viewing in any browser
 
 ## Diagrams
 
@@ -39,7 +39,24 @@ codelibrarian diagram imports
 codelibrarian diagram imports --file src/codelibrarian/searcher.py
 ```
 
-The same diagrams are available via MCP tools (`generate_class_diagram`, `generate_call_graph`, `generate_import_graph`), so any LLM client can request them.
+### HTML Output
+
+Add `--html` to any diagram command to produce a self-contained HTML page with Mermaid.js embedded — no internet connection required. The page includes a light/dark theme toggle.
+
+```bash
+# Generate an HTML file and open it in the browser
+codelibrarian diagram class SQLiteStore --html -o class.html
+codelibrarian diagram calls index_root --html -o calls.html
+codelibrarian diagram imports --html -o imports.html
+```
+
+Without `-o`, HTML is written to stdout, so you can pipe it:
+
+```bash
+codelibrarian diagram class MyClass --html > diagram.html
+```
+
+The same diagrams are available via MCP tools (`generate_class_diagram`, `generate_call_graph`, `generate_import_graph`), so any LLM client can request them. Pass `format: "html"` to get a self-contained HTML page instead of raw Mermaid text.
 
 ## Supported Languages
 
@@ -132,9 +149,9 @@ The server runs on stdio and provides these tools:
 | `get_file_imports` | Show a file's imports and reverse imports |
 | `list_symbols` | Filter symbols by kind, name pattern, or file |
 | `get_class_hierarchy` | Get inheritance tree for a class |
-| `generate_class_diagram` | Generate a Mermaid class hierarchy diagram |
-| `generate_call_graph` | Generate a Mermaid call graph diagram |
-| `generate_import_graph` | Generate a Mermaid module import dependency diagram |
+| `generate_class_diagram` | Generate a Mermaid class hierarchy diagram (supports `format: "html"`) |
+| `generate_call_graph` | Generate a Mermaid call graph diagram (supports `format: "html"`) |
+| `generate_import_graph` | Generate a Mermaid module import dependency diagram (supports `format: "html"`) |
 
 ### Claude Desktop Configuration
 
@@ -182,13 +199,15 @@ codelibrarian hooks install [--path DIR]
     Install git post-commit and post-merge hooks for automatic
     incremental reindexing after each commit.
 
-codelibrarian diagram class NAME [--path DIR]
+codelibrarian diagram class NAME [--html] [--output FILE] [--path DIR]
     Generate a Mermaid class hierarchy diagram.
+    --html       Output self-contained HTML instead of Mermaid text.
+    --output/-o  Write output to a file instead of stdout.
 
-codelibrarian diagram calls NAME [--depth N] [--direction callees|callers] [--path DIR]
+codelibrarian diagram calls NAME [--depth N] [--direction callees|callers] [--html] [--output FILE] [--path DIR]
     Generate a Mermaid call graph diagram.
 
-codelibrarian diagram imports [--file PATH] [--path DIR]
+codelibrarian diagram imports [--file PATH] [--html] [--output FILE] [--path DIR]
     Generate a Mermaid module import dependency diagram.
 
 codelibrarian serve [--path DIR]

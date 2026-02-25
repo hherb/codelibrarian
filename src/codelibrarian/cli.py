@@ -394,6 +394,15 @@ fi
 # diagram
 # --------------------------------------------------------------------------- #
 
+def _emit_output(text: str, output_file: str | None) -> None:
+    """Write text to file or stdout."""
+    if output_file:
+        Path(output_file).write_text(text, encoding="utf-8")
+        click.echo(f"Written to {output_file}")
+    else:
+        click.echo(text)
+
+
 @main.group()
 def diagram():
     """Generate Mermaid diagrams from the code index."""
@@ -401,8 +410,10 @@ def diagram():
 
 @diagram.command("class")
 @click.argument("name")
+@click.option("--html", "as_html", is_flag=True, help="Output self-contained HTML instead of Mermaid text")
+@click.option("--output", "-o", "output_file", type=click.Path(), default=None, help="Write output to file")
 @click.option("--path", default=None, help="Project root")
-def diagram_class(name: str, path: str | None):
+def diagram_class(name: str, as_html: bool, output_file: str | None, path: str | None):
     """Generate a class hierarchy diagram in Mermaid syntax."""
     root = Path(path).resolve() if path else None
     config = Config.load(root) if root else Config.load_from_cwd()
@@ -420,7 +431,12 @@ def diagram_class(name: str, path: str | None):
     if not result:
         click.echo(f"Class '{name}' not found in index.")
         sys.exit(1)
-    click.echo(result)
+
+    if as_html:
+        from codelibrarian.html_renderer import render_html
+        result = render_html(result, title=f"Class Diagram: {name}")
+
+    _emit_output(result, output_file)
 
 
 @diagram.command("calls")
@@ -432,8 +448,10 @@ def diagram_class(name: str, path: str | None):
     default="callees",
     help="Traverse callees (forward) or callers (backward)",
 )
+@click.option("--html", "as_html", is_flag=True, help="Output self-contained HTML instead of Mermaid text")
+@click.option("--output", "-o", "output_file", type=click.Path(), default=None, help="Write output to file")
 @click.option("--path", default=None, help="Project root")
-def diagram_calls(name: str, depth: int, direction: str, path: str | None):
+def diagram_calls(name: str, depth: int, direction: str, as_html: bool, output_file: str | None, path: str | None):
     """Generate a call graph diagram in Mermaid syntax."""
     root = Path(path).resolve() if path else None
     config = Config.load(root) if root else Config.load_from_cwd()
@@ -451,13 +469,20 @@ def diagram_calls(name: str, depth: int, direction: str, path: str | None):
     if not result:
         click.echo(f"Symbol '{name}' not found or has no call edges.")
         sys.exit(1)
-    click.echo(result)
+
+    if as_html:
+        from codelibrarian.html_renderer import render_html
+        result = render_html(result, title=f"Call Graph: {name}")
+
+    _emit_output(result, output_file)
 
 
 @diagram.command("imports")
 @click.option("--file", "file_path", default=None, help="Scope to a single file")
+@click.option("--html", "as_html", is_flag=True, help="Output self-contained HTML instead of Mermaid text")
+@click.option("--output", "-o", "output_file", type=click.Path(), default=None, help="Write output to file")
 @click.option("--path", default=None, help="Project root")
-def diagram_imports(file_path: str | None, path: str | None):
+def diagram_imports(file_path: str | None, as_html: bool, output_file: str | None, path: str | None):
     """Generate a module import graph diagram in Mermaid syntax."""
     root = Path(path).resolve() if path else None
     config = Config.load(root) if root else Config.load_from_cwd()
@@ -475,7 +500,13 @@ def diagram_imports(file_path: str | None, path: str | None):
     if not result:
         click.echo("No import edges found in index.")
         sys.exit(1)
-    click.echo(result)
+
+    if as_html:
+        from codelibrarian.html_renderer import render_html
+        title = f"Import Graph: {file_path}" if file_path else "Import Graph"
+        result = render_html(result, title=title)
+
+    _emit_output(result, output_file)
 
 
 # --------------------------------------------------------------------------- #

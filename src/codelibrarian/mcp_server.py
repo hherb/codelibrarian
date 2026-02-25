@@ -245,7 +245,13 @@ def _make_server(config: Config) -> tuple[Server, SQLiteStore, EmbeddingClient |
                         "class_name": {
                             "type": "string",
                             "description": "Class name or qualified class name",
-                        }
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["mermaid", "html"],
+                            "default": "mermaid",
+                            "description": "Output format: 'mermaid' for raw syntax, 'html' for self-contained page",
+                        },
                     },
                     "required": ["class_name"],
                 },
@@ -274,6 +280,12 @@ def _make_server(config: Config) -> tuple[Server, SQLiteStore, EmbeddingClient |
                             "default": "callees",
                             "description": "Traverse forward (callees) or backward (callers)",
                         },
+                        "format": {
+                            "type": "string",
+                            "enum": ["mermaid", "html"],
+                            "default": "mermaid",
+                            "description": "Output format: 'mermaid' for raw syntax, 'html' for self-contained page",
+                        },
                     },
                     "required": ["qualified_name"],
                 },
@@ -290,7 +302,13 @@ def _make_server(config: Config) -> tuple[Server, SQLiteStore, EmbeddingClient |
                         "file_path": {
                             "type": "string",
                             "description": "Optional file path to scope the graph to",
-                        }
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["mermaid", "html"],
+                            "default": "mermaid",
+                            "description": "Output format: 'mermaid' for raw syntax, 'html' for self-contained page",
+                        },
                     },
                 },
             ),
@@ -391,7 +409,12 @@ def _dispatch(
     elif name == "generate_class_diagram":
         from codelibrarian.diagrams import mermaid_class_diagram
         result = mermaid_class_diagram(searcher.store, args["class_name"])
-        return {"mermaid": result} if result else {"error": "Class not found"}
+        if not result:
+            return {"error": "Class not found"}
+        if args.get("format") == "html":
+            from codelibrarian.html_renderer import render_html
+            return {"html": render_html(result, title=f"Class Diagram: {args['class_name']}")}
+        return {"mermaid": result}
 
     elif name == "generate_call_graph":
         from codelibrarian.diagrams import mermaid_call_graph
@@ -400,12 +423,24 @@ def _dispatch(
         result = mermaid_call_graph(
             searcher.store, args["qualified_name"], depth=depth, direction=direction
         )
-        return {"mermaid": result} if result else {"error": "Symbol not found or no edges"}
+        if not result:
+            return {"error": "Symbol not found or no edges"}
+        if args.get("format") == "html":
+            from codelibrarian.html_renderer import render_html
+            return {"html": render_html(result, title=f"Call Graph: {args['qualified_name']}")}
+        return {"mermaid": result}
 
     elif name == "generate_import_graph":
         from codelibrarian.diagrams import mermaid_import_graph
-        result = mermaid_import_graph(searcher.store, file_path=args.get("file_path"))
-        return {"mermaid": result} if result else {"error": "No import edges found"}
+        file_path = args.get("file_path")
+        result = mermaid_import_graph(searcher.store, file_path=file_path)
+        if not result:
+            return {"error": "No import edges found"}
+        if args.get("format") == "html":
+            from codelibrarian.html_renderer import render_html
+            title = f"Import Graph: {file_path}" if file_path else "Import Graph"
+            return {"html": render_html(result, title=title)}
+        return {"mermaid": result}
 
     else:
         raise ValueError(f"Unknown tool: {name}")
