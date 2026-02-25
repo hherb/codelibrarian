@@ -12,17 +12,28 @@ from codelibrarian.models import RewrittenQuery
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM_PROMPT = """\
+_BASE_SYSTEM_PROMPT = """\
 You are a code search assistant. Given a natural language question about a codebase, \
 return JSON with search terms a developer would use to find the relevant code.
 
+{vocabulary_section}\
 Return ONLY valid JSON:
-{"terms": ["term1", "term2", ...], "focus": "implementation"|"tests"|"all"}
+{{"terms": ["term1", "term2", ...], "focus": "implementation"|"tests"|"all"}}
 
 Rules:
-- terms: 3-6 short search terms (function names, variable names, SQL keywords, etc.)
+- terms: 3-6 search terms, preferring actual symbol names from the codebase
 - focus: "implementation" if asking about how code works, "tests" if asking about testing, "all" if unclear
 - No explanations, just JSON"""
+
+
+def _build_system_prompt(vocabulary: list[str] | None = None) -> str:
+    """Build the system prompt, optionally with codebase vocabulary."""
+    if vocabulary:
+        vocab_text = ", ".join(vocabulary)
+        section = f"Available symbols in the codebase:\n{vocab_text}\n\n"
+    else:
+        section = ""
+    return _BASE_SYSTEM_PROMPT.format(vocabulary_section=section)
 
 
 class QueryRewriter:
@@ -36,18 +47,24 @@ class QueryRewriter:
         self.model = model
         self._client = httpx.Client(timeout=timeout)
 
-    def rewrite(self, query: str) -> RewrittenQuery | None:
+    def rewrite(
+        self, query: str, vocabulary: list[str] | None = None
+    ) -> RewrittenQuery | None:
         """Rewrite a natural language query into code search terms.
+
+        If *vocabulary* is provided, the LLM prompt includes the codebase's
+        symbol names so it can pick actual identifiers instead of generic words.
 
         Returns None on any failure (timeout, connection error, bad JSON).
         """
+        system_prompt = _build_system_prompt(vocabulary)
         try:
             resp = self._client.post(
                 self.api_url,
                 json={
                     "model": self.model,
                     "messages": [
-                        {"role": "system", "content": _SYSTEM_PROMPT},
+                        {"role": "system", "content": system_prompt},
                         {"role": "user", "content": query},
                     ],
                     "temperature": 0.0,

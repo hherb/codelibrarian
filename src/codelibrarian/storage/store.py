@@ -783,6 +783,15 @@ class SQLiteStore:
     # Stats
     # ------------------------------------------------------------------ #
 
+    def get_symbol_vocabulary(self) -> list[str]:
+        """Return distinct symbol names, excluding test and dunder symbols."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT name FROM symbols "
+            "WHERE name NOT LIKE 'test_%' "
+            "ORDER BY name"
+        ).fetchall()
+        return [r["name"] for r in rows if not r["name"].startswith("__")]
+
     def stats(self) -> dict:
         counts = {}
         for kind in ("function", "method", "class", "module"):

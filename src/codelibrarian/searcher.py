@@ -23,6 +23,13 @@ class Searcher:
         self.store = store
         self.embedder = embedder
         self.rewriter = rewriter
+        self._vocabulary: list[str] | None = None
+
+    def _get_vocabulary(self) -> list[str]:
+        """Lazy-load and cache the symbol vocabulary for query rewriting."""
+        if self._vocabulary is None:
+            self._vocabulary = self.store.get_symbol_vocabulary()
+        return self._vocabulary
 
     # ------------------------------------------------------------------ #
     # Hybrid search (primary entry point)
@@ -48,24 +55,39 @@ class Searcher:
         rewritten: RewrittenQuery | None = None
         if self.rewriter:
             if rewrite or _should_rewrite(query):
-                rewritten = self.rewriter.rewrite(query)
+                vocab = self._get_vocabulary()
+                rewritten = self.rewriter.rewrite(query, vocabulary=vocab)
 
         # --- Run search (rewritten or original) ---
         if rewritten:
-            results = self._hybrid_search(
-                " ".join(rewritten.terms), limit, semantic_only, text_only
+            # Fetch extra candidates so focus adjustment has room to re-rank
+            fetch_limit = limit * 3
+            rewrite_query = " ".join(rewritten.terms)
+            rewrite_results = self._hybrid_search(
+                rewrite_query, fetch_limit, semantic_only, text_only, use_or=True
             )
+            original_results = self._hybrid_search(
+                query, fetch_limit, semantic_only, text_only
+            )
+            results = _merge_results(rewrite_results, original_results, fetch_limit)
             results = _apply_focus(results, rewritten.focus)
         else:
             results = self._hybrid_search(query, limit, semantic_only, text_only)
 
         # --- Zero-results fallback: try LLM rewrite ---
         if not results and self.rewriter and not rewritten:
-            rewritten = self.rewriter.rewrite(query)
+            vocab = self._get_vocabulary()
+            rewritten = self.rewriter.rewrite(query, vocabulary=vocab)
             if rewritten:
-                results = self._hybrid_search(
-                    " ".join(rewritten.terms), limit, semantic_only, text_only
+                fetch_limit = limit * 3
+                rewrite_query = " ".join(rewritten.terms)
+                rewrite_results = self._hybrid_search(
+                    rewrite_query, fetch_limit, semantic_only, text_only, use_or=True
                 )
+                original_results = self._hybrid_search(
+                    query, fetch_limit, semantic_only, text_only
+                )
+                results = _merge_results(rewrite_results, original_results, fetch_limit)
                 results = _apply_focus(results, rewritten.focus)
 
         return results[:limit]
@@ -76,8 +98,14 @@ class Searcher:
         limit: int,
         semantic_only: bool,
         text_only: bool,
+        use_or: bool = False,
     ) -> list[SearchResult]:
-        """Core hybrid search (FTS + vector). Extracted for reuse by rewrite path."""
+        """Core hybrid search (FTS + vector). Extracted for reuse by rewrite path.
+
+        When *use_or* is True, FTS tokens are joined with OR instead of AND.
+        This is used for LLM-rewritten queries where each term is an independent
+        symbol suggestion rather than a conjunctive phrase.
+        """
         fts_hits: dict[int, float] = {}
         vec_hits: dict[int, float] = {}
 
@@ -88,11 +116,11 @@ class Searcher:
                     vec_hits[sym_id] = max(0.0, 1.0 - dist / 2.0)
 
         if not semantic_only:
-            safe_query = _fts5_query(query)
+            safe_query = _fts5_query(query, use_or=use_or)
             if safe_query:
                 for sym_id, score in self.store.fts_search(safe_query, limit=limit * 2):
                     fts_hits[sym_id] = min(score / _BM25_SCALE, 1.0)
-            if not fts_hits:
+            if not fts_hits and not use_or:
                 or_query = _fts5_query(query, use_or=True)
                 if or_query and or_query != safe_query:
                     for sym_id, score in self.store.fts_search(or_query, limit=limit * 2):
@@ -373,6 +401,21 @@ def _is_test_file(path: str) -> bool:
     return False
 
 
+def _merge_results(
+    primary: list[SearchResult], secondary: list[SearchResult], limit: int
+) -> list[SearchResult]:
+    """Merge two result lists, keeping the higher score for duplicates."""
+    by_id: dict[int, SearchResult] = {}
+    for r in primary:
+        by_id[r.symbol.id] = r
+    for r in secondary:
+        existing = by_id.get(r.symbol.id)
+        if existing is None or r.score > existing.score:
+            by_id[r.symbol.id] = r
+    merged = sorted(by_id.values(), key=lambda r: r.score, reverse=True)
+    return merged[:limit]
+
+
 def _apply_focus(results: list[SearchResult], focus: str) -> list[SearchResult]:
     """Adjust scores based on focus signal and re-sort."""
     if focus == "all":
@@ -384,9 +427,9 @@ def _apply_focus(results: list[SearchResult], focus: str) -> list[SearchResult]:
         is_test = _is_test_file(path)
         score = r.score
         if focus == "implementation" and is_test:
-            score *= 0.7
+            score *= 0.5
         elif focus == "tests" and not is_test:
-            score *= 0.7
+            score *= 0.5
         adjusted.append(SearchResult(symbol=r.symbol, score=score, match_type=r.match_type))
 
     adjusted.sort(key=lambda r: r.score, reverse=True)
