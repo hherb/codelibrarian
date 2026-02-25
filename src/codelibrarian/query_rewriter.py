@@ -1,0 +1,92 @@
+"""LLM-powered query rewriter using an OpenAI-compatible chat completions API."""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+
+import httpx
+
+from codelibrarian.models import RewrittenQuery
+
+logger = logging.getLogger(__name__)
+
+_SYSTEM_PROMPT = """\
+You are a code search assistant. Given a natural language question about a codebase, \
+return JSON with search terms a developer would use to find the relevant code.
+
+Return ONLY valid JSON:
+{"terms": ["term1", "term2", ...], "focus": "implementation"|"tests"|"all"}
+
+Rules:
+- terms: 3-6 short search terms (function names, variable names, SQL keywords, etc.)
+- focus: "implementation" if asking about how code works, "tests" if asking about testing, "all" if unclear
+- No explanations, just JSON"""
+
+
+class QueryRewriter:
+    def __init__(
+        self,
+        api_url: str,
+        model: str,
+        timeout: float = 5.0,
+    ):
+        self.api_url = api_url.rstrip("/")
+        self.model = model
+        self._client = httpx.Client(timeout=timeout)
+
+    def rewrite(self, query: str) -> RewrittenQuery | None:
+        """Rewrite a natural language query into code search terms.
+
+        Returns None on any failure (timeout, connection error, bad JSON).
+        """
+        try:
+            resp = self._client.post(
+                self.api_url,
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": _SYSTEM_PROMPT},
+                        {"role": "user", "content": query},
+                    ],
+                    "temperature": 0.0,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            content = data["choices"][0]["message"]["content"]
+            return self._parse_response(content)
+        except Exception as exc:
+            logger.debug("Query rewrite failed: %s", exc)
+            return None
+
+    def _parse_response(self, content: str) -> RewrittenQuery | None:
+        """Parse the LLM response into a RewrittenQuery."""
+        # Strip markdown code fences if present
+        cleaned = re.sub(r"^```(?:json)?\s*\n?", "", content.strip())
+        cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+        try:
+            parsed = json.loads(cleaned)
+        except json.JSONDecodeError:
+            logger.debug("Query rewrite returned invalid JSON: %s", content)
+            return None
+
+        terms = parsed.get("terms")
+        if not terms or not isinstance(terms, list):
+            return None
+
+        focus = parsed.get("focus", "all")
+        if focus not in ("implementation", "tests", "all"):
+            focus = "all"
+
+        return RewrittenQuery(terms=terms, focus=focus)
+
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self) -> "QueryRewriter":
+        return self
+
+    def __exit__(self, *_) -> None:
+        self.close()
