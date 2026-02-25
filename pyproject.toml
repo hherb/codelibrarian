@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codelibrarian"
-version = "0.1.0"
+version = "0.2.0"
 description = "Self-maintaining code index for LLM and human queries via MCP and CLI"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
