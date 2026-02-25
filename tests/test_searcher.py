@@ -271,3 +271,97 @@ class TestIsTestFile:
 
     def test_fixture_file(self):
         assert _is_test_file("tests/fixtures/sample.py") is True
+
+
+# --------------------------------------------------------------------------- #
+# Query rewrite integration tests
+# --------------------------------------------------------------------------- #
+
+import json
+from unittest.mock import MagicMock, patch
+
+from codelibrarian.models import RewrittenQuery
+from codelibrarian.query_rewriter import QueryRewriter
+
+
+@pytest.fixture
+def searcher_with_rewriter(tmp_path):
+    """Searcher with a mocked QueryRewriter."""
+    config_dir = tmp_path / ".codelibrarian"
+    config_dir.mkdir()
+
+    config = Config(
+        data={
+            "index": {
+                "root": str(FIXTURES),
+                "exclude": ["__pycache__/", ".git/"],
+                "languages": ["python"],
+            },
+            "embeddings": {
+                "api_url": "http://localhost:11434/v1/embeddings",
+                "model": "nomic-embed-text-v2-moe",
+                "dimensions": 4,
+                "batch_size": 32,
+                "max_chars": 1600,
+                "enabled": False,
+            },
+            "database": {"path": str(tmp_path / "test.db")},
+        },
+        config_dir=config_dir,
+    )
+
+    store = SQLiteStore(config.db_path, embedding_dimensions=4)
+    store.connect()
+    store.init_schema()
+
+    indexer = Indexer(store, config)
+    indexer.index_root()
+    store.conn.commit()
+
+    rewriter = MagicMock(spec=QueryRewriter)
+    yield Searcher(store, embedder=None, rewriter=rewriter), rewriter
+
+    store.close()
+
+
+def test_search_with_forced_rewrite(searcher_with_rewriter):
+    """rewrite=True should call the rewriter and use rewritten terms."""
+    s, mock_rewriter = searcher_with_rewriter
+    mock_rewriter.rewrite.return_value = RewrittenQuery(
+        terms=["find_oldest", "animal", "shelter"],
+        focus="implementation",
+    )
+
+    results = s.search("how do you find the oldest animal?", rewrite=True)
+    mock_rewriter.rewrite.assert_called_once()
+    assert len(results) > 0
+
+
+def test_search_rewrite_fallback_on_failure(searcher_with_rewriter):
+    """If rewriter returns None, fall back to normal search."""
+    s, mock_rewriter = searcher_with_rewriter
+    mock_rewriter.rewrite.return_value = None
+
+    results = s.search("find_oldest", rewrite=True, text_only=True)
+    # Should still return results via normal search path
+    assert len(results) > 0
+
+
+def test_search_zero_results_triggers_rewrite(searcher_with_rewriter):
+    """When initial search returns nothing, try LLM rewrite as fallback."""
+    s, mock_rewriter = searcher_with_rewriter
+    mock_rewriter.rewrite.return_value = RewrittenQuery(
+        terms=["find_oldest", "Animal"],
+        focus="all",
+    )
+
+    # Query that would normally return zero results
+    results = s.search("xyzzy_nonexistent_gibberish_query", text_only=True)
+    # The rewriter should have been called as fallback
+    mock_rewriter.rewrite.assert_called_once()
+
+
+def test_search_no_rewriter_still_works(searcher):
+    """Searcher without a rewriter should work exactly as before."""
+    results = searcher.search("oldest animal", text_only=True)
+    assert len(results) > 0

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 from codelibrarian.embeddings import EmbeddingClient
-from codelibrarian.models import SearchResult, SymbolRecord
+from codelibrarian.models import RewrittenQuery, SearchResult, SymbolRecord
 from codelibrarian.storage.store import SQLiteStore
 
 # BM25 scores are negative; dividing by this scale brings typical values into [0, 1].
@@ -14,9 +14,15 @@ _BM25_SCALE: float = 10.0
 
 
 class Searcher:
-    def __init__(self, store: SQLiteStore, embedder: EmbeddingClient | None = None):
+    def __init__(
+        self,
+        store: SQLiteStore,
+        embedder: EmbeddingClient | None = None,
+        rewriter: "QueryRewriter | None" = None,
+    ):
         self.store = store
         self.embedder = embedder
+        self.rewriter = rewriter
 
     # ------------------------------------------------------------------ #
     # Hybrid search (primary entry point)
@@ -28,6 +34,7 @@ class Searcher:
         limit: int = 10,
         semantic_only: bool = False,
         text_only: bool = False,
+        rewrite: bool = False,
     ) -> list[SearchResult]:
         # --- Graph intent routing ---
         intent = _classify_intent(query)
@@ -36,7 +43,41 @@ class Searcher:
             result = self._dispatch_graph(intent_type, symbol_name, limit)
             if result is not None:
                 return result
-        # --- Existing hybrid search (unchanged below this point) ---
+
+        # --- Query rewrite decision ---
+        rewritten: RewrittenQuery | None = None
+        if self.rewriter:
+            if rewrite or _should_rewrite(query):
+                rewritten = self.rewriter.rewrite(query)
+
+        # --- Run search (rewritten or original) ---
+        if rewritten:
+            results = self._hybrid_search(
+                " ".join(rewritten.terms), limit, semantic_only, text_only
+            )
+            results = _apply_focus(results, rewritten.focus)
+        else:
+            results = self._hybrid_search(query, limit, semantic_only, text_only)
+
+        # --- Zero-results fallback: try LLM rewrite ---
+        if not results and self.rewriter and not rewritten:
+            rewritten = self.rewriter.rewrite(query)
+            if rewritten:
+                results = self._hybrid_search(
+                    " ".join(rewritten.terms), limit, semantic_only, text_only
+                )
+                results = _apply_focus(results, rewritten.focus)
+
+        return results[:limit]
+
+    def _hybrid_search(
+        self,
+        query: str,
+        limit: int,
+        semantic_only: bool,
+        text_only: bool,
+    ) -> list[SearchResult]:
+        """Core hybrid search (FTS + vector). Extracted for reuse by rewrite path."""
         fts_hits: dict[int, float] = {}
         vec_hits: dict[int, float] = {}
 
@@ -44,8 +85,6 @@ class Searcher:
             query_vec = self.embedder.embed_one(query)
             if query_vec:
                 for sym_id, dist in self.store.vector_search(query_vec, limit=limit * 2):
-                    # Cosine distance ranges from 0 (identical) to 2 (opposite).
-                    # Convert to a 0-1 similarity score.
                     vec_hits[sym_id] = max(0.0, 1.0 - dist / 2.0)
 
         if not semantic_only:
@@ -53,14 +92,12 @@ class Searcher:
             if safe_query:
                 for sym_id, score in self.store.fts_search(safe_query, limit=limit * 2):
                     fts_hits[sym_id] = min(score / _BM25_SCALE, 1.0)
-            # If AND matched nothing, fall back to OR so partial matches surface
             if not fts_hits:
                 or_query = _fts5_query(query, use_or=True)
                 if or_query and or_query != safe_query:
                     for sym_id, score in self.store.fts_search(or_query, limit=limit * 2):
                         fts_hits[sym_id] = min(score / _BM25_SCALE, 1.0)
 
-        # Merge scores
         all_ids = set(fts_hits) | set(vec_hits)
         scored: list[tuple[int, float, str]] = []
         for sym_id in all_ids:
@@ -334,3 +371,23 @@ def _is_test_file(path: str) -> bool:
     if basename.startswith("test_") or basename.endswith("_test.py"):
         return True
     return False
+
+
+def _apply_focus(results: list[SearchResult], focus: str) -> list[SearchResult]:
+    """Adjust scores based on focus signal and re-sort."""
+    if focus == "all":
+        return results
+
+    adjusted = []
+    for r in results:
+        path = r.symbol.relative_path or r.symbol.file_path
+        is_test = _is_test_file(path)
+        score = r.score
+        if focus == "implementation" and is_test:
+            score *= 0.7
+        elif focus == "tests" and not is_test:
+            score *= 0.7
+        adjusted.append(SearchResult(symbol=r.symbol, score=score, match_type=r.match_type))
+
+    adjusted.sort(key=lambda r: r.score, reverse=True)
+    return adjusted
