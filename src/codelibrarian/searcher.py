@@ -252,3 +252,85 @@ def _classify_intent(query: str) -> tuple[str, str] | None:
         if m:
             return (intent, m.group(group_idx))
     return None
+
+
+# --------------------------------------------------------------------------- #
+# Query rewrite heuristic
+# --------------------------------------------------------------------------- #
+
+_QUESTION_WORDS = frozenset({"how", "what", "where", "why", "when", "which", "does", "do"})
+
+_CAMEL_CASE_RE = re.compile(r"[a-z][A-Z]")
+_SNAKE_CASE_RE = re.compile(r"\w+_\w+")
+_DOTTED_PATH_RE = re.compile(r"\w+\.\w+")
+
+
+def _should_rewrite(query: str) -> bool:
+    """Decide whether a query needs LLM rewriting.
+
+    Returns True for natural-language queries, False for code-like queries.
+    """
+    query = query.strip()
+    if not query:
+        return False
+
+    # Code-like patterns: skip LLM
+    if _DOTTED_PATH_RE.search(query):
+        return False
+    if _CAMEL_CASE_RE.search(query):
+        return False
+
+    tokens = re.split(r"[^\w]+", query)
+    tokens = [t for t in tokens if t]
+    if not tokens:
+        return False
+
+    # Single snake_case token: code-like
+    if len(tokens) == 1 and _SNAKE_CASE_RE.match(tokens[0]):
+        return False
+
+    non_stop = [t for t in tokens if t.lower() not in _STOP_WORDS]
+
+    # Too few meaningful tokens: probably a keyword search
+    if len(non_stop) < 3:
+        # Unless any remaining token is snake_case
+        if any(_SNAKE_CASE_RE.match(t) for t in non_stop):
+            return False
+        # Short queries without code patterns — still not enough signal
+        return False
+
+    # Any token is snake_case: code-like
+    if any(_SNAKE_CASE_RE.match(t) for t in tokens):
+        return False
+
+    # Contains question words + enough tokens: natural language
+    lower_tokens = {t.lower() for t in tokens}
+    if lower_tokens & _QUESTION_WORDS:
+        return True
+
+    # High stop-word ratio signals natural language
+    stop_count = sum(1 for t in tokens if t.lower() in _STOP_WORDS)
+    if len(tokens) > 0 and stop_count / len(tokens) > 0.4:
+        return True
+
+    return False
+
+
+# --------------------------------------------------------------------------- #
+# Focus-based score adjustment
+# --------------------------------------------------------------------------- #
+
+
+def _is_test_file(path: str) -> bool:
+    """Check if a file path looks like a test file."""
+    import os
+
+    parts = path.replace("\\", "/").split("/")
+    basename = os.path.basename(path)
+    # Path contains tests/ directory
+    if "tests" in parts:
+        return True
+    # File starts with test_ or ends with _test.py
+    if basename.startswith("test_") or basename.endswith("_test.py"):
+        return True
+    return False

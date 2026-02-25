@@ -210,3 +210,64 @@ class TestClassifyIntent:
 
     def test_no_match_empty(self):
         assert _classify_intent("") is None
+
+
+# --------------------------------------------------------------------------- #
+# Rewrite heuristic tests
+# --------------------------------------------------------------------------- #
+
+from codelibrarian.searcher import _should_rewrite, _is_test_file
+
+
+class TestShouldRewrite:
+    """Tests for the rewrite heuristic."""
+
+    def test_natural_language_question(self):
+        assert _should_rewrite("how are edges inserted into the graph?") is True
+
+    def test_question_with_what(self):
+        assert _should_rewrite("what function handles authentication") is True
+
+    def test_question_with_where(self):
+        assert _should_rewrite("where does the config file get loaded") is True
+
+    def test_high_stop_word_ratio(self):
+        assert _should_rewrite("how does the system handle errors in the pipeline") is True
+
+    def test_code_like_snake_case(self):
+        assert _should_rewrite("insert_call") is False
+
+    def test_code_like_camel_case(self):
+        assert _should_rewrite("insertCall") is False
+
+    def test_code_like_dotted_path(self):
+        assert _should_rewrite("store.insert_call") is False
+
+    def test_short_keyword_query(self):
+        assert _should_rewrite("graph edges") is False
+
+    def test_single_word(self):
+        assert _should_rewrite("search") is False
+
+    def test_empty_string(self):
+        assert _should_rewrite("") is False
+
+
+class TestIsTestFile:
+    def test_tests_directory(self):
+        assert _is_test_file("tests/test_store.py") is True
+
+    def test_test_prefix(self):
+        assert _is_test_file("src/test_helper.py") is True
+
+    def test_test_suffix(self):
+        assert _is_test_file("src/store_test.py") is True
+
+    def test_implementation_file(self):
+        assert _is_test_file("src/codelibrarian/store.py") is False
+
+    def test_nested_tests_dir(self):
+        assert _is_test_file("project/tests/unit/test_foo.py") is True
+
+    def test_fixture_file(self):
+        assert _is_test_file("tests/fixtures/sample.py") is True
