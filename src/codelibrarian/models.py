@@ -76,6 +76,14 @@ class ParseResult:
 
 
 @dataclass
+class RewrittenQuery:
+    """Result of LLM-based query rewriting."""
+
+    terms: list[str]
+    focus: str = "all"  # "implementation", "tests", "all"
+
+
+@dataclass
 class FileRecord:
     id: int
     path: str
