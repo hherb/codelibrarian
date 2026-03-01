@@ -1,3 +1,4 @@
+import * as vscode from "vscode";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type {
@@ -7,6 +8,8 @@ import type {
   ClassHierarchy,
   FileImports,
 } from "./types.js";
+
+const log = vscode.window.createOutputChannel("Codelibrarian", { log: true });
 
 export class McpClient {
   private client: Client | null = null;
@@ -45,20 +48,31 @@ export class McpClient {
 
   async callTool<T>(name: string, args: Record<string, unknown>): Promise<T | null> {
     if (!this._ready || !this.client) {
+      log.warn(`callTool(${name}): client not ready`);
       return null;
     }
     try {
+      log.info(`callTool(${name}) args=${JSON.stringify(args)}`);
       const result = await this.client.callTool({ name, arguments: args });
       const content = result.content;
       if (!Array.isArray(content) || content.length === 0) {
+        log.warn(`callTool(${name}): empty content in response`);
         return null;
       }
       const first = content[0];
       if (typeof first === "object" && "text" in first) {
-        return JSON.parse(first.text as string) as T;
+        const parsed = JSON.parse(first.text as string) as T;
+        if (parsed && typeof parsed === "object" && "error" in parsed) {
+          log.error(`callTool(${name}): server error: ${(parsed as Record<string, unknown>).error}`);
+          return null;
+        }
+        log.info(`callTool(${name}): success`);
+        return parsed;
       }
+      log.warn(`callTool(${name}): unexpected content format`);
       return null;
-    } catch {
+    } catch (err) {
+      log.error(`callTool(${name}): ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
   }

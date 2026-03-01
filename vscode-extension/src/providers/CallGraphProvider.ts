@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import type { McpSupervisor } from "../mcp/McpSupervisor.js";
 import type { SymbolRecord } from "../mcp/types.js";
 
-type CallGraphNode = GroupNode | SymbolNode;
+type CallGraphNode = GroupNode | SymbolNode | MessageNode;
 
 class GroupNode {
   constructor(
@@ -14,6 +14,10 @@ class GroupNode {
 
 class SymbolNode {
   constructor(public readonly symbol: SymbolRecord) {}
+}
+
+class MessageNode {
+  constructor(public readonly text: string) {}
 }
 
 export class CallGraphProvider implements vscode.TreeDataProvider<CallGraphNode> {
@@ -36,6 +40,12 @@ export class CallGraphProvider implements vscode.TreeDataProvider<CallGraphNode>
   }
 
   getTreeItem(element: CallGraphNode): vscode.TreeItem {
+    if (element instanceof MessageNode) {
+      const item = new vscode.TreeItem(element.text, vscode.TreeItemCollapsibleState.None);
+      item.iconPath = new vscode.ThemeIcon("info");
+      return item;
+    }
+
     if (element instanceof GroupNode) {
       const item = new vscode.TreeItem(
         element.label,
@@ -47,7 +57,7 @@ export class CallGraphProvider implements vscode.TreeDataProvider<CallGraphNode>
       return item;
     }
 
-    const sym = element.symbol;
+    const sym = (element as SymbolNode).symbol;
     const item = new vscode.TreeItem(
       sym.name,
       vscode.TreeItemCollapsibleState.Collapsed,
@@ -76,8 +86,15 @@ export class CallGraphProvider implements vscode.TreeDataProvider<CallGraphNode>
   }
 
   async getChildren(element?: CallGraphNode): Promise<CallGraphNode[]> {
+    if (element instanceof MessageNode) return [];
+
     const client = this.supervisor.mcpClient;
-    if (!client?.ready) return [];
+    if (!client?.ready) {
+      if (this.rootQualifiedName) {
+        return [new MessageNode("Server not connected")];
+      }
+      return [];
+    }
 
     if (!element) {
       if (!this.rootQualifiedName) return [];
@@ -95,6 +112,9 @@ export class CallGraphProvider implements vscode.TreeDataProvider<CallGraphNode>
         element.direction === "callers"
           ? await client.getCallers(element.qualifiedName)
           : await client.getCallees(element.qualifiedName);
+      if (symbols.length === 0) {
+        return [new MessageNode("No results found")];
+      }
       return symbols.map((s) => new SymbolNode(s));
     }
 

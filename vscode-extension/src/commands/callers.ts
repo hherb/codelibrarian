@@ -10,12 +10,20 @@ export function registerCallersCommand(
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "codelibrarian.showCallers",
-      async (qualifiedName?: string) => {
-        const name = qualifiedName ?? (await pickSymbolName(supervisor));
+      async (qualifiedName?: unknown) => {
+        if (!supervisor.mcpClient?.ready) {
+          vscode.window.showWarningMessage("Codelibrarian server is not connected.");
+          return;
+        }
+        // Context menu passes a URI as the first arg — ignore non-string values
+        const name =
+          typeof qualifiedName === "string"
+            ? qualifiedName
+            : await pickSymbolName(supervisor);
         if (!name) return;
 
         callGraphProvider.setRoot(name, "callers");
-        vscode.commands.executeCommand("codelibrarian.callGraphView.focus");
+        await vscode.commands.executeCommand("codelibrarian.callGraphView.focus");
       },
     ),
   );
@@ -29,12 +37,20 @@ export function registerCalleesCommand(
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "codelibrarian.showCallees",
-      async (qualifiedName?: string) => {
-        const name = qualifiedName ?? (await pickSymbolName(supervisor));
+      async (qualifiedName?: unknown) => {
+        if (!supervisor.mcpClient?.ready) {
+          vscode.window.showWarningMessage("Codelibrarian server is not connected.");
+          return;
+        }
+        // Context menu passes a URI as the first arg — ignore non-string values
+        const name =
+          typeof qualifiedName === "string"
+            ? qualifiedName
+            : await pickSymbolName(supervisor);
         if (!name) return;
 
         callGraphProvider.setRoot(name, "callees");
-        vscode.commands.executeCommand("codelibrarian.callGraphView.focus");
+        await vscode.commands.executeCommand("codelibrarian.callGraphView.focus");
       },
     ),
   );
